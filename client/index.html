@@ -26,11 +26,19 @@
                     <input id="guild-name-input" placeholder="New guild name" />
                     <button id="create-guild-btn">Create Guild</button>
                 </div>
+                <div id="join-guild-area" style="margin-top: 15px; padding-top: 10px; border-top: 1px dashed #ccc;">
+                    <input id="join-guild-code-input" placeholder="Enter invite code" />
+                    <button id="join-guild-btn">Join with Code</button>
+                </div>
             </div>
 
             <!-- Channels Column -->
             <div id="channels-column" style="width: 200px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto; display: none;">
                 <h2 id="channels-header">Channels</h2>
+                <div id="guild-actions-area" style="margin-bottom:10px; padding-bottom:10px; border-bottom: 1px dashed #ccc;">
+                    <button id="generate-invite-btn" style="display:none; width:100%; margin-bottom:5px;">Generate Invite</button>
+                    <input type="text" id="generated-invite-code-display" readonly style="width:calc(100% - 12px); display:none; margin-bottom:5px; background-color:#eee; text-align:center;" />
+                </div>
                 <ul id="channel-list">
                     <!-- Channels for selected guild -->
                 </ul>
@@ -45,6 +53,7 @@
                 <div id="chat-view-selector" style="padding-bottom: 10px; border-bottom: 1px solid #ccc; margin-bottom:10px;">
                     <button id="show-global-chat-btn" class="active-view">Global Chat</button>
                     <button id="show-guild-chat-btn">Guild Chat</button>
+                    <button id="show-dm-chat-btn">Direct Messages</button>
                 </div>
 
                 <!-- Global Chat Area (existing) -->
@@ -61,6 +70,21 @@
                     <ul id="guild-messages" style="list-style-type: none; margin: 0; padding: 0; overflow-y: auto; flex-grow: 1; border-bottom: 1px solid #eee;"></ul>
                     <form id="guild-chat-form" action="" style="padding: 10px 0;">
                         <input id="guild-chat-input" autocomplete="off" placeholder="Message in channel..."/><button>Send</button>
+                    </form>
+                </div>
+
+                <!-- Direct Message Chat Area (New) -->
+                <div id="dm-chat-area" style="display: none; flex: 1; display: flex; flex-direction: column;">
+                    <div id="dm-chat-header-controls" style="display: flex; justify-content: space-between; align-items: center; padding: 0 15px; background-color: var(--light-bg); border-bottom: 1px solid var(--border-color);">
+                        <h3 id="dm-chat-header">Direct Message</h3>
+                        <button id="dm-call-user-btn" style="display:none;">Call User</button>
+                    </div>
+                    <ul id="dm-messages" style="list-style-type: none; margin: 0; padding: 0; overflow-y: auto; flex-grow: 1; border-bottom: 1px solid #eee;"></ul>
+                    <div id="dm-target-info" style="padding: 5px 15px; font-size: 0.8em; background-color: var(--light-bg); border-bottom: 1px solid var(--border-color); display:none;">
+                        Chatting with: <strong id="dm-chatting-with">Nobody</strong>
+                    </div>
+                    <form id="dm-chat-form" action="" style="padding: 10px 0;">
+                        <input id="dm-chat-input" autocomplete="off" placeholder="Send a direct message..."/><button>Send</button>
                     </form>
                 </div>
             </div>

@@ -34,6 +34,17 @@ const guildMessages = document.getElementById('guild-messages');
 const guildChatForm = document.getElementById('guild-chat-form');
 const guildChatInput = document.getElementById('guild-chat-input');
 
+// --- Direct Message Elements (New) ---
+const showDmChatBtn = document.getElementById('show-dm-chat-btn');
+const dmChatArea = document.getElementById('dm-chat-area');
+const dmChatHeader = document.getElementById('dm-chat-header');
+const dmCallUserBtn = document.getElementById('dm-call-user-btn');
+const dmMessages = document.getElementById('dm-messages');
+const dmTargetInfo = document.getElementById('dm-target-info');
+const dmChattingWith = document.getElementById('dm-chatting-with');
+const dmChatForm = document.getElementById('dm-chat-form');
+const dmChatInput = document.getElementById('dm-chat-input');
+
 // --- Video Call Elements ---
 const callTargetUsernameInput = document.getElementById('call-target-username');
 const initiateCallBtn = document.getElementById('initiate-call-btn');
@@ -47,9 +58,12 @@ const remoteVideo = document.getElementById('remote-video');
 // --- Client State ---
 let currentUsername = 'Anonymous';
 let currentFKey = null; // username@instanceId, set when username is set
+let serverInstanceId = null; // Will be populated by the server
 let userGuilds = [];      // Array of guild objects this user is part of
 let selectedGuildId = null;
 let selectedChannelId = null;
+let currentDmTargetFKey = null; // New: Federated key of the current DM partner
+let dmHistories = {};         // New: Cache for DM conversations, e.g., { "conversationId": [messages] }
 
 // WebRTC Global Variables
 let localStream = null;
@@ -67,17 +81,32 @@ const STUN_SERVERS = {
     ]
 };
 
+// New Guild Invite Elements
+const joinGuildCodeInput = document.getElementById('join-guild-code-input');
+const joinGuildBtn = document.getElementById('join-guild-btn');
+const guildActionsArea = document.getElementById('guild-actions-area'); // Container for invite button
+const generateInviteBtn = document.getElementById('generate-invite-btn');
+const generatedInviteCodeDisplay = document.getElementById('generated-invite-code-display');
+
 if (setUsernameBtn) {
+    // Initially disable username input and related buttons until serverInstanceId is received
+    usernameInput.disabled = true;
+    setUsernameBtn.disabled = true;
+    if (guildNameInput) guildNameInput.disabled = true;
+    if (createGuildBtn) createGuildBtn.disabled = true;
+    if (joinGuildCodeInput) joinGuildCodeInput.disabled = true;
+    if (joinGuildBtn) joinGuildBtn.disabled = true;
+    // Call buttons are handled by resetCallStateAndUI
+
     setUsernameBtn.addEventListener('click', () => {
+        if (!serverInstanceId) {
+            alert('Still connecting to the server instance. Please wait a moment.');
+            return;
+        }
         const username = usernameInput.value.trim();
         if (username) {
             currentUsername = username;
-            // Assuming server's OUR_INSTANCE_ID is available client-side for local user FKey construction
-            // This is a simplification; in a real app, server would confirm/provide the FKey or instance ID.
-            // For now, we construct it, but it's mainly for client-side checks like guild ownership.
-            // Server will use socket.username + OUR_INSTANCE_ID for actual FKey.
-            // Let's use a placeholder for instance ID until server provides it directly on connect.
-            currentFKey = `${currentUsername}@local_user`; // Placeholder
+            currentFKey = `${username}@${serverInstanceId}`; // Use server-provided instance ID
             currentUsernameDisplay.textContent = currentUsername;
             socket.emit('set username', username);
             usernameInput.disabled = true;
@@ -87,6 +116,8 @@ if (setUsernameBtn) {
             if (callStatus) callStatus.textContent = 'Ready to call.'; 
             if (createGuildBtn) createGuildBtn.disabled = false;
             if (guildNameInput) guildNameInput.disabled = false;
+            if (joinGuildCodeInput) joinGuildCodeInput.disabled = false;
+            if (joinGuildBtn) joinGuildBtn.disabled = false;
         } else {
             alert('Username cannot be empty.');
         }
@@ -109,19 +140,21 @@ function resetCallStateAndUI() {
     if (remoteVideo) remoteVideo.srcObject = null;
     
     const isAnon = (currentUsername === 'Anonymous');
+    const isDisconnected = !serverInstanceId; // New check for initial connection
+
     if (initiateCallBtn) {
         initiateCallBtn.style.display = 'inline-block';
-        initiateCallBtn.disabled = isAnon;
+        initiateCallBtn.disabled = isAnon || isDisconnected;
     }
     if (callTargetUsernameInput) {
-        callTargetUsernameInput.disabled = isAnon;
+        callTargetUsernameInput.disabled = isAnon || isDisconnected;
         callTargetUsernameInput.value = '';
     }
     if (answerCallBtn) answerCallBtn.style.display = 'none';
     if (rejectCallBtn) rejectCallBtn.style.display = 'none';
     if (hangUpBtn) hangUpBtn.style.display = 'none';
     if (callStatus) {
-        callStatus.textContent = isAnon ? 'Set username to enable calling.' : 'Ready to call.';
+        callStatus.textContent = isDisconnected ? 'Connecting to server...' : (isAnon ? 'Set username to enable calling.' : 'Ready to call.');
     }
     currentCallTargetSocketId = null;
     currentCallTargetUsername = null;
@@ -137,6 +170,9 @@ function resetCallStateAndUI() {
         guildChatHeader.textContent = 'Select a guild and channel';
     }
     document.querySelectorAll('#channel-list li.selected-channel').forEach(el => el.classList.remove('selected-channel'));
+    // Hide guild-specific action buttons on full reset or if no guild selected
+    if (generateInviteBtn) generateInviteBtn.style.display = 'none';
+    if (generatedInviteCodeDisplay) generatedInviteCodeDisplay.style.display = 'none';
 }
 
 async function startLocalMedia() {
@@ -152,7 +188,7 @@ async function startLocalMedia() {
             console.warn("localVideo DOM element not found when trying to set srcObject.");
         }
         console.log("Local media stream acquired successfully.");
-        if (initiateCallBtn) initiateCallBtn.disabled = (currentUsername === 'Anonymous');
+        if (initiateCallBtn) initiateCallBtn.disabled = (currentUsername === 'Anonymous' || !serverInstanceId);
         if (answerCallBtn && incomingCallData) answerCallBtn.disabled = false; 
         return true;
     } catch (error) {
@@ -468,10 +504,32 @@ form.addEventListener('submit', function(e) {
 });
 
 socket.on('update user list', (users) => {
+    if (!userList) return;
     userList.innerHTML = '';
-    users.forEach(user => {
+    users.forEach(userFKey => { // Assuming server now sends array of userFKeys
         const item = document.createElement('li');
-        item.textContent = user; 
+        const usernamePart = userFKey.split('@')[0];
+        const instancePart = userFKey.split('@')[1] ? `@${userFKey.split('@')[1]}` : '';
+        
+        item.textContent = usernamePart;
+        if (instancePart && instancePart !== `@${serverInstanceId}`) {
+            item.textContent += ` (${instancePart.substring(1)})`; // Show remote instance if different
+        }
+        item.dataset.userFKey = userFKey;
+
+        if (userFKey === currentFKey) {
+            item.classList.add('current-user-self'); // Style for self in list
+            item.title = 'This is you!';
+        } else {
+            item.addEventListener('click', () => {
+                if (currentUsername === 'Anonymous' || !currentFKey) {
+                    alert('Please set your username before starting a DM.');
+                    return;
+                }
+                console.log(`Initiating DM with: ${userFKey}`);
+                switchToDmChatView(userFKey);
+            });
+        }
         userList.appendChild(item);
     });
 });
@@ -525,6 +583,12 @@ function renderGuilds(guildsData) {
         });
         guildList.appendChild(item);
     });
+
+    if (guildsData.length === 0) {
+        if (channelsColumn) channelsColumn.style.display = 'none';
+        if (generateInviteBtn) generateInviteBtn.style.display = 'none'; // Hide if no guilds
+        if (generatedInviteCodeDisplay) generatedInviteCodeDisplay.style.display = 'none';
+    }
 }
 
 if (createGuildBtn) {
@@ -543,32 +607,36 @@ if (createGuildBtn) {
 
 if (showGlobalChatBtn) showGlobalChatBtn.addEventListener('click', switchToGlobalChatView);
 if (showGuildChatBtn) showGuildChatBtn.addEventListener('click', switchToGuildChatView);
+if (showDmChatBtn) showDmChatBtn.addEventListener('click', () => switchToDmChatView(null)); // Switch to DM view, but don't select a user yet
 
 function switchToGlobalChatView() {
-    if (globalChatArea) globalChatArea.style.display = 'block';
+    if (globalChatArea) globalChatArea.style.display = 'flex'; // Changed to flex
     if (guildChatArea) guildChatArea.style.display = 'none';
+    if (dmChatArea) dmChatArea.style.display = 'none';
     if (channelsColumn) channelsColumn.style.display = 'none';
     
     if (showGlobalChatBtn) showGlobalChatBtn.classList.add('active-view');
     if (showGuildChatBtn) showGuildChatBtn.classList.remove('active-view');
+    if (showDmChatBtn) showDmChatBtn.classList.remove('active-view');
     
     const currentSelectedGuild = guildList ? guildList.querySelector('.selected-guild') : null;
-    if (currentSelectedGuild) {
-        currentSelectedGuild.classList.remove('selected-guild');
-    }
+    if (currentSelectedGuild) currentSelectedGuild.classList.remove('selected-guild');
+    
     selectedGuildId = null;
     selectedChannelId = null;
+    // currentDmTargetFKey = null; // Don't clear DM target when just switching views generally
     if (guildChatHeader) guildChatHeader.textContent = 'Select a guild and channel';
+    if (dmCallUserBtn) dmCallUserBtn.style.display = 'none';
+    if (dmTargetInfo) dmTargetInfo.style.display = 'none';
 }
 
 function switchToGuildChatView() {
     if (globalChatArea) globalChatArea.style.display = 'none';
-    if (guildChatArea) {
-        guildChatArea.style.display = 'flex'; 
-    }
+    if (guildChatArea) guildChatArea.style.display = 'flex'; 
+    if (dmChatArea) dmChatArea.style.display = 'none';
     
     if (selectedGuildId && channelsColumn) {
-        channelsColumn.style.display = 'block';
+        channelsColumn.style.display = 'block'; // or 'flex' if it's a flex container
     } else if (!selectedGuildId && channelsColumn) {
         channelsColumn.style.display = 'none'; 
         if (guildChatHeader) guildChatHeader.textContent = 'Select a guild first';
@@ -576,32 +644,228 @@ function switchToGuildChatView() {
 
     if (showGuildChatBtn) showGuildChatBtn.classList.add('active-view');
     if (showGlobalChatBtn) showGlobalChatBtn.classList.remove('active-view');
+    if (showDmChatBtn) showDmChatBtn.classList.remove('active-view');
+    // currentDmTargetFKey = null;
+    if (dmCallUserBtn) dmCallUserBtn.style.display = 'none';
+    if (dmTargetInfo) dmTargetInfo.style.display = 'none';
 }
 
-socket.on('update guild list', ({ guilds }) => {
-    console.log('Received guild list:', guilds);
-    if(guilds) renderGuilds(guilds);
-});
+function switchToDmChatView(targetUserFKey) {
+    if (globalChatArea) globalChatArea.style.display = 'none';
+    if (guildChatArea) guildChatArea.style.display = 'none';
+    if (dmChatArea) dmChatArea.style.display = 'flex';
+    if (channelsColumn) channelsColumn.style.display = 'none'; // Hide channels when in DM view
 
-socket.on('guild created', ({ guild }) => {
-    console.log('Guild created event:', guild);
-    // Server also sends 'update guild list', so explicit add/re-render might be redundant
-    // but good for immediate feedback if list update is delayed.
-    // Let's ensure userGuilds state is updated and then render.
-    const existingGuild = userGuilds.find(g => g.id === guild.id);
-    if (!existingGuild) {
-        userGuilds.push(guild);
+    if (showDmChatBtn) showDmChatBtn.classList.add('active-view');
+    if (showGlobalChatBtn) showGlobalChatBtn.classList.remove('active-view');
+    if (showGuildChatBtn) showGuildChatBtn.classList.remove('active-view');
+
+    const deselectedGuild = guildList ? guildList.querySelector('.selected-guild') : null;
+    if (deselectedGuild) deselectedGuild.classList.remove('selected-guild');
+    selectedGuildId = null; // Deselect guild when going to DMs
+    selectedChannelId = null;
+
+    if (targetUserFKey) {
+        currentDmTargetFKey = targetUserFKey;
+        const targetUsername = targetUserFKey.split('@')[0];
+        if (dmChatHeader) dmChatHeader.textContent = `DM with ${targetUsername}`;
+        if (dmMessages) dmMessages.innerHTML = ''; // Clear previous DM messages
+        if (dmTargetInfo) {
+            dmTargetInfo.style.display = 'block';
+            dmChattingWith.textContent = targetUsername;
+        }
+        if (dmCallUserBtn) {
+             dmCallUserBtn.style.display = (targetUserFKey === currentFKey) ? 'none' : 'inline-block'; // Don't show call for self
+        }
+        
+        console.log(`Loading DM history with ${targetUserFKey}`);
+        socket.emit('load_dm_history', { withUserFKey: targetUserFKey });
+    } else {
+        // No specific user selected, general DM view (e.g. show list of recent DMs - future feature)
+        currentDmTargetFKey = null;
+        if (dmChatHeader) dmChatHeader.textContent = 'Direct Messages';
+        if (dmMessages) dmMessages.innerHTML = '<li style="text-align:center; color: #888;">Select a user to start a DM.</li>';
+        if (dmTargetInfo) dmTargetInfo.style.display = 'none';
+        if (dmCallUserBtn) dmCallUserBtn.style.display = 'none';
     }
-    renderGuilds(userGuilds); // Re-render to reflect new guild immediately
-    alert(`Guild "${guild.name}" created successfully!`);
+}
+
+// DM Form Submission
+if (dmChatForm) {
+    dmChatForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (dmChatInput.value && currentDmTargetFKey && currentUsername !== 'Anonymous') {
+            socket.emit('send_dm', { 
+                targetUserFKey: currentDmTargetFKey, 
+                messageContent: dmChatInput.value 
+            });
+            dmChatInput.value = '';
+        } else if (currentUsername === 'Anonymous') {
+            alert('Please set your username first!');
+        } else if (!currentDmTargetFKey) {
+            alert('Please select a user to send a DM to.');
+        }
+    });
+}
+
+// --- Socket Handlers for DMs ---
+socket.on('receive_dm', (messageObject) => {
+    // messageObject includes senderFKey, receiverFKey, content, timestamp, id, AND conversationId
+    console.log('Received DM:', messageObject);
+    const conversationId = messageObject.conversationId || getDmConversationId(messageObject.senderFKey, messageObject.receiverFKey); // Ensure conversationId is present
+
+    if (!dmHistories[conversationId]) {
+        dmHistories[conversationId] = [];
+    }
+    // Avoid duplicates if sender also gets receive_dm for their own message
+    if (!dmHistories[conversationId].find(m => m.id === messageObject.id)) {
+        dmHistories[conversationId].push(messageObject);
+    }
+    
+    // If this DM is for the currently active DM chat, render it
+    if (currentDmTargetFKey && (conversationId === getDmConversationId(currentFKey, currentDmTargetFKey))) {
+        renderDmMessage(messageObject);
+    } else {
+        // TODO: Add a visual notification for new DMs not currently in view
+        console.log(`Notification: New DM from ${messageObject.senderFKey.split('@')[0]} in conversation ${conversationId}`);
+        // Highlight user in user list or show a badge on DM tab (future enhancement)
+    }
 });
 
-socket.on('guild creation error', ({ message }) => {
-    console.error('Guild creation error:', message);
-    alert(`Guild creation failed: ${message}`);
+socket.on('dm_history', ({ withUserFKey, messages, conversationId }) => {
+    console.log(`Received DM history for ${withUserFKey}:`, messages.length, 'messages');
+    dmHistories[conversationId] = messages;
+    if (currentDmTargetFKey === withUserFKey) {
+        if (dmMessages) dmMessages.innerHTML = ''; // Clear before loading history
+        messages.forEach(msg => renderDmMessage(msg));
+        if (messages.length === 0 && dmMessages) {
+            dmMessages.innerHTML = '<li style="text-align:center; color: #888;">No messages yet. Say hi!</li>';
+        }
+    }
 });
+
+socket.on('dm_error', ({ message }) => {
+    console.error('DM Error:', message);
+    alert(`DM Error: ${message}`);
+});
+
+function getDmConversationId(fKey1, fKey2) { // Client-side helper
+    if (!fKey1 || !fKey2) return null;
+    return [fKey1, fKey2].sort().join('_');
+}
+
+function renderDmMessage(msg) {
+    if (!dmMessages) return;
+    const item = document.createElement('li');
+    const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+    let prefix = msg.senderFKey === currentFKey ? "Me" : msg.senderFKey.split('@')[0];
+    const instancePart = msg.senderFKey.split('@')[1];
+    if (instancePart && instancePart !== serverInstanceId && msg.senderFKey !== currentFKey) {
+        prefix += ` @${instancePart.substring(0, instancePart.indexOf('_') !== -1 ? instancePart.indexOf('_') : instancePart.length)}`; // Show short instance name
+    }
+
+    item.textContent = `[${timestamp}] ${prefix}: ${msg.content}`;
+    item.classList.add(msg.senderFKey === currentFKey ? 'dm-message-sent' : 'dm-message-received');
+    // Add unique ID for potential future use (e.g., reactions, replies)
+    item.dataset.messageId = msg.id;
+
+dmMessages.appendChild(item);
+    dmMessages.scrollTop = dmMessages.scrollHeight;
+}
+
+// Placeholder for styling current user in user list and DM messages
+// const style = document.createElement('style');
+// style.textContent = `
+//     #user-list li.current-user-self {
+//         font-style: italic;
+//         color: var(--primary-color);
+//         font-weight: bold;
+//         background-color: var(--hover-item-bg);
+//     }
+//     #dm-messages li.dm-message-sent {
+//         background-color: #dcf8c6; /* A light green, typical for sent messages */
+//         margin-left: auto; /* Align to right */
+//         max-width: 70%;
+//         border-radius: 10px 10px 0 10px;
+//     }
+//     #dm-messages li.dm-message-received {
+//         background-color: #f1f0f0; /* A light grey for received */
+//         margin-right: auto; /* Align to left */
+//         max-width: 70%;
+//         border-radius: 10px 10px 10px 0;
+//     }
+//     #dm-messages li {
+//         padding: 8px 12px;
+//         margin-bottom: 5px;
+//         word-wrap: break-word;
+//     }
+// `;
+// document.head.appendChild(style);
+
+// Call User button in DM view
+if (dmCallUserBtn) {
+    dmCallUserBtn.addEventListener('click', () => {
+        if (!currentDmTargetFKey || currentDmTargetFKey === currentFKey) {
+            alert('No valid DM target to call.');
+            return;
+        }
+        if (currentUsername === 'Anonymous') {
+            alert('Please set your username before making a call.');
+            return;
+        }
+        const targetUsernameToCall = currentDmTargetFKey.split('@')[0];
+        console.log(`Attempting to call DM target: ${targetUsernameToCall} (FKey: ${currentDmTargetFKey})`);
+        if (callTargetUsernameInput) {
+            callTargetUsernameInput.value = targetUsernameToCall; // Populate the main call input
+        }
+        // Trigger the existing call initiation logic
+        // Ensure peerConnection is reset if it's in a weird state
+        if (peerConnection && peerConnection.signalingState !== 'stable') {
+            console.warn('Resetting potentially unstable peer connection before new call attempt.');
+            resetCallStateAndUI(); // This will also recreate peerConnection on demand
+        }
+        initiateCallBtn.click(); 
+    });
+}
+
+// Modify initial UI setup based on new DM view
+switchToGlobalChatView(); // Start in global chat
+if (dmChatArea) dmChatArea.style.display = 'none'; // Ensure DM area is hidden initially
+// ... other initial setup calls if any ...
 
 // Initial UI setup
-if (createGuildBtn) createGuildBtn.disabled = true;
-if (guildNameInput) guildNameInput.disabled = true;
-switchToGlobalChatView();
+// if (createGuildBtn) createGuildBtn.disabled = true; // Now handled by instance_id_info and setUsername
+// if (guildNameInput) guildNameInput.disabled = true; // Now handled
+// switchToGlobalChatView(); // Already called
+
+// --- Instance ID Handling ---
+socket.on('instance_id_info', (data) => {
+    if (data && data.instanceId) {
+        serverInstanceId = data.instanceId;
+        console.log('Received instance ID:', serverInstanceId);
+        // Enable username input now that we have the instance ID
+        if (usernameInput) usernameInput.disabled = false;
+        if (setUsernameBtn) setUsernameBtn.disabled = false;
+        
+        // Update call status if it was 'Connecting...'
+        if (callStatus && callStatus.textContent === 'Connecting to server...') {
+            if (currentUsername === 'Anonymous') {
+                callStatus.textContent = 'Set username to enable calling.';
+            } else {
+                callStatus.textContent = 'Ready to call.';
+            }
+        }
+        // Enable guild related buttons if username is already set (e.g. on a reconnect with stored username - though we don't have that yet)
+        // For now, they will be enabled once username is set.
+        if (currentUsername !== 'Anonymous') {
+             if (guildNameInput) guildNameInput.disabled = false;
+             if (createGuildBtn) createGuildBtn.disabled = false;
+             if (joinGuildCodeInput) joinGuildCodeInput.disabled = false;
+             if (joinGuildBtn) joinGuildBtn.disabled = false;
+        }
+
+    } else {
+        console.error('Received invalid instance_id_info:', data);
+        if (callStatus) callStatus.textContent = 'Error: Could not connect to server instance.';
+    }
+});

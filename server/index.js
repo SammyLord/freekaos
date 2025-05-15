@@ -14,6 +14,8 @@ const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 const WORD_BLACKLIST_FILE = path.join(__dirname, 'config/word_blacklist.txt');
 const INSTANCE_BLACKLIST_FILE = path.join(__dirname, 'config/instance_blacklist.txt');
 const PEER_LIST_FILE = path.join(__dirname, 'config/peer_list.txt');
+const GUILDS_FILE = path.join(__dirname, 'guilds.json'); // Existing guilds file
+const DMS_FILE = path.join(__dirname, 'direct_messages.json'); // New DMs file
 let messages = [];
 let users = {}; // Store socket.id -> username mapping
 let wordBlacklist = [];
@@ -24,8 +26,8 @@ let federatedUserDirectory = {}; // { "username@instanceId": { instanceId: "..."
 const OUR_INSTANCE_ID = `instance_at_${PORT}`; // Defined earlier for peer handshake
 
 // New: Guilds and Channels
-const GUILDS_FILE = path.join(__dirname, 'guilds.json');
-let guilds = {}; // { guildId: { id, name, ownerFKey, members: [userFKey], channels: { channelId: { id, name, type: 'text', messages: [] } } } }
+let guilds = {}; // { guildId: { id, name, ownerFKey, members: [userFKey], channels: { channelId: { id, name, type: 'text', messages: [] } }, invites: {} } }
+let directMessages = {}; // New: { "sortedFKey1_sortedFKey2": [ {senderFKey, receiverFKey, content, timestamp, id} ] }
 
 // Load word blacklist
 function loadWordBlacklist() {
@@ -179,6 +181,10 @@ function loadGuilds() {
                         }
                     }
                 }
+                // Ensure invites object exists
+                if (!guilds[guildId].invites) {
+                    guilds[guildId].invites = {};
+                }
             }
         }
     } catch (err) {
@@ -197,8 +203,36 @@ function saveGuilds() {
     }
 }
 
+// New: Load Direct Messages from file
+function loadDirectMessages() {
+    try {
+        if (fs.existsSync(DMS_FILE)) {
+            const data = fs.readFileSync(DMS_FILE, 'utf8');
+            directMessages = JSON.parse(data);
+            console.log('Direct Messages loaded from file.');
+        } else {
+            directMessages = {};
+            console.log('Direct Messages file not found. Initializing empty DMs.');
+        }
+    } catch (err) {
+        console.error('Error loading direct messages:', err);
+        directMessages = {};
+    }
+}
+
+// New: Save Direct Messages to file
+function saveDirectMessages() {
+    try {
+        fs.writeFileSync(DMS_FILE, JSON.stringify(directMessages, null, 2));
+        // console.log('Direct Messages saved to file.');
+    } catch (err) {
+        console.error('Error saving direct messages:', err);
+    }
+}
+
 loadMessages();
 loadGuilds(); // Load guilds on startup
+loadDirectMessages(); // Load DMs on startup
 
 // Function to broadcast the updated user list
 function broadcastUserList() {
@@ -314,6 +348,55 @@ function addFederatedWebRTCHandlersToPeerSocket(peerSocketConnection, peerInstan
     // e.g., peerSocketConnection.on('federated-call-rejected', (fdata) => { ... });
 }
 
+// New function to handle federated DM events from a peer
+function addFederatedDMHandlersToPeerSocket(peerSocketConnection, peerInstanceId) {
+    console.log(`Adding federated DM handlers for peer: ${peerInstanceId} (socket: ${peerSocketConnection.id})`);
+
+    peerSocketConnection.on('federated_send_dm', ({ originalSenderFKey, targetUserFKey, messageObject }) => {
+        console.log(`Received federated_send_dm from peer ${peerInstanceId} for target ${targetUserFKey} from ${originalSenderFKey}`);
+
+        if (!targetUserFKey.endsWith(`@${OUR_INSTANCE_ID}`)) {
+            console.warn(`Federated DM received by ${OUR_INSTANCE_ID} but target ${targetUserFKey} is not for this instance. Ignoring.`);
+            return;
+        }
+        if (!messageObject || !messageObject.id || !messageObject.senderFKey || !messageObject.content) {
+            console.warn(`Invalid messageObject in federated_send_dm from ${peerInstanceId}. Ignoring.`, messageObject);
+            return;
+        }
+
+        // The messageObject.senderFKey should be originalSenderFKey.
+        // The messageObject.receiverFKey should be targetUserFKey.
+        // Ensure consistency if they differ, or trust the outer fields.
+        // For now, let's ensure messageObject fields are correctly set if they are part of the message object sent.
+        // The critical part is storing and delivering correctly.
+
+        const conversationId = getDmConversationId(originalSenderFKey, targetUserFKey);
+        if (!directMessages[conversationId]) {
+            directMessages[conversationId] = [];
+        }
+        // Avoid duplicating if by some chance it was already stored (e.g. complex routing, though unlikely here)
+        if (!directMessages[conversationId].find(m => m.id === messageObject.id)) {
+            directMessages[conversationId].push(messageObject);
+            if (directMessages[conversationId].length > 200) { // Prune DM history
+                directMessages[conversationId].shift();
+            }
+            saveDirectMessages();
+        }
+        
+        // Deliver to the local target user
+        const localTargetUsername = targetUserFKey.split('@')[0];
+        const localTargetSocket = Object.values(io.sockets.sockets).find(s => s.username === localTargetUsername && federatedUserDirectory[targetUserFKey]?.localSocketId === s.id);
+        
+        if (localTargetSocket) {
+            console.log(`Forwarding federated DM to local user ${localTargetUsername} (${localTargetSocket.id})`);
+            localTargetSocket.emit('receive_dm', { ...messageObject, conversationId });
+        } else {
+            console.warn(`Federated DM received for ${targetUserFKey}, but target user ${localTargetUsername} not found locally on this instance.`);
+            // Message is saved. User will get it if they connect and load history.
+        }
+    });
+}
+
 // New function to handle federated guild-related events from a peer
 function addFederatedGuildHandlersToPeerSocket(peerSocketConnection, peerInstanceId) {
     console.log(`Adding federated Guild handlers for peer: ${peerInstanceId} (socket: ${peerSocketConnection.id})`);
@@ -400,6 +483,7 @@ function connectToPeers() {
             addFederatedUserListHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
             addFederatedChatMessageHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
             addFederatedGuildHandlersToPeerSocket(peerSocket, ackData.instanceId); // Add guild handlers for outgoing peer
+            addFederatedDMHandlersToPeerSocket(peerSocket, ackData.instanceId); // Add DM handlers for outgoing peer
 
             // Send our user list to the newly connected peer
             const localUsersForPeers = {};
@@ -439,6 +523,10 @@ function connectToPeers() {
 }
 
 io.on('connection', (socket) => {
+    console.log(`A user connected: ${socket.id}`);
+    // Emit the instance ID to the newly connected client
+    socket.emit('instance_id_info', { instanceId: OUR_INSTANCE_ID });
+
     // By default, assume it's a client connection
     let isPeer = false;
     let peerAddress = null; // For identified peers
@@ -483,6 +571,7 @@ io.on('connection', (socket) => {
         addFederatedUserListHandlersToPeerSocket(socket, peerAddress); // Placeholder
         addFederatedChatMessageHandlersToPeerSocket(socket, peerAddress); // Placeholder
         addFederatedGuildHandlersToPeerSocket(socket, peerAddress); // Add guild handlers for incoming peer
+        addFederatedDMHandlersToPeerSocket(socket, peerAddress); // Add DM handlers for incoming peer
 
         broadcastFederatedUserList(); // Update lists
         socket.emit('peer_handshake_ack', { instanceId: OUR_INSTANCE_ID });
@@ -576,6 +665,101 @@ io.on('connection', (socket) => {
             // For now, let's just send the updated list of guilds this user is part of
             const userGuilds = Object.values(guilds).filter(g => g.members.includes(creatorFKey));
             socket.emit('update guild list', { guilds: userGuilds });
+        });
+
+        socket.on('generate guild invite', ({ guildId }) => {
+            if (isPeer || !socket.username || socket.username === 'Anonymous') {
+                socket.emit('guild invite error', { guildId, message: 'Authentication required.' });
+                return;
+            }
+            const userFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+            const guild = guilds[guildId];
+
+            if (!guild) {
+                socket.emit('guild invite error', { guildId, message: 'Guild not found.' });
+                return;
+            }
+            if (guild.ownerFKey !== userFKey) {
+                socket.emit('guild invite error', { guildId, message: 'Only the guild owner can generate invites.' });
+                return;
+            }
+
+            // Create a simple unique invite code
+            const inviteCode = `invite_${guildId.substring(0,5)}_${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(-4)}`;
+            
+            if (!guild.invites) guild.invites = {};
+            guild.invites[inviteCode] = { 
+                code: inviteCode, // Store the code itself for easier reference if needed
+                createdAt: Date.now(), 
+                usesLeft: 1, // Single use for now
+                createdBy: userFKey
+            };
+            saveGuilds();
+
+            console.log(`User ${userFKey} generated invite code ${inviteCode} for guild ${guild.name}`);
+            socket.emit('guild invite generated', { guildId, inviteCode });
+        });
+
+        socket.on('join guild with invite', ({ inviteCode }) => {
+            if (isPeer || !socket.username || socket.username === 'Anonymous') {
+                socket.emit('guild join error', { inviteCode, message: 'Authentication required.' });
+                return;
+            }
+            const userFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+            let foundGuild = null;
+            let actualInviteCode = null;
+
+            // Find the guild and the invite code
+            for (const guildId in guilds) {
+                if (guilds[guildId].invites && guilds[guildId].invites[inviteCode]) {
+                    foundGuild = guilds[guildId];
+                    actualInviteCode = guilds[guildId].invites[inviteCode];
+                    break;
+                }
+            }
+
+            if (!foundGuild || !actualInviteCode) {
+                socket.emit('guild join error', { inviteCode, message: 'Invalid or expired invite code.' });
+                return;
+            }
+
+            if (actualInviteCode.usesLeft <= 0) {
+                socket.emit('guild join error', { inviteCode, message: 'Invite code has no uses left.' });
+                // Optionally delete the invite code here if usesLeft is 0 and it wasn't caught by a prune
+                delete foundGuild.invites[inviteCode];
+                saveGuilds();
+                return;
+            }
+
+            if (foundGuild.members.includes(userFKey)) {
+                socket.emit('guild join info', { guildId: foundGuild.id, message: 'You are already a member of this guild.' });
+                 // Still decrement use if they tried to use it, or not? For now, let's assume they didn't "use" it.
+                return;
+            }
+
+            foundGuild.members.push(userFKey);
+            actualInviteCode.usesLeft--;
+
+            if (actualInviteCode.usesLeft <= 0) {
+                delete foundGuild.invites[inviteCode]; // Remove single-use invite after use
+            }
+            saveGuilds();
+
+            console.log(`User ${userFKey} joined guild ${foundGuild.name} using invite code ${inviteCode}`);
+            socket.emit('guild join success', { guild: foundGuild });
+
+            // Notify the joining user with their updated full list of guilds
+            const userGuilds = Object.values(guilds).filter(g => g.members.includes(userFKey));
+            socket.emit('update guild list', { guilds: userGuilds });
+
+            // Notify all members of the guild about the structural update (new member)
+            Object.values(io.sockets.sockets).forEach(s => {
+                if (!s.username || s.username === 'Anonymous') return;
+                const memberFKeyLoop = `${s.username}@${OUR_INSTANCE_ID}`;
+                if (foundGuild.members.includes(memberFKeyLoop)) {
+                    s.emit('guild structure updated', { guild: foundGuild });
+                }
+            });
         });
 
         socket.on('create channel', ({ guildId, channelName, channelType = 'text' }) => {
@@ -750,6 +934,107 @@ io.on('connection', (socket) => {
                         peerSockets[peerAddr].emit('federated_chat_message', messageData);
                     }
                 }
+
+                // --- Direct Message Handlers ---
+                function getDmConversationId(fKey1, fKey2) {
+                    return [fKey1, fKey2].sort().join('_');
+                }
+
+                socket.on('send_dm', async ({ targetUserFKey, messageContent }) => {
+                    if (!socket.username || socket.username === 'Anonymous') {
+                        // Optionally send an error event back to client
+                        console.warn('DM send attempt by unauthenticated user:', socket.id);
+                        socket.emit('dm_error', { message: 'Authentication required to send DMs.' });
+                        return;
+                    }
+                    if (!targetUserFKey || !messageContent || messageContent.trim() === '') {
+                        console.warn('Invalid send_dm payload:', { targetUserFKey, messageContent });
+                        socket.emit('dm_error', { message: 'Target user and message content are required.' });
+                        return;
+                    }
+
+                    const senderFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+                    if (senderFKey === targetUserFKey) {
+                        socket.emit('dm_error', { message: 'You cannot send a DM to yourself.' });
+                        return;
+                    }
+
+                    const censoredContent = censorMessage(messageContent.trim());
+                    const messageId = `dm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                    const messageObject = {
+                        id: messageId,
+                        senderFKey: senderFKey,
+                        receiverFKey: targetUserFKey,
+                        content: censoredContent,
+                        timestamp: new Date().toISOString(),
+                    };
+
+                    const conversationId = getDmConversationId(senderFKey, targetUserFKey);
+                    if (!directMessages[conversationId]) {
+                        directMessages[conversationId] = [];
+                    }
+                    directMessages[conversationId].push(messageObject);
+                    if (directMessages[conversationId].length > 200) { // Prune DM history per conversation
+                        directMessages[conversationId].shift();
+                    }
+                    saveDirectMessages();
+
+                    console.log(`DM from ${senderFKey} to ${targetUserFKey}: ${censoredContent}`);
+
+                    // Deliver to local target if they are on this instance
+                    const targetInstanceId = targetUserFKey.split('@')[1];
+                    if (targetInstanceId === OUR_INSTANCE_ID) {
+                        const targetUsername = targetUserFKey.split('@')[0];
+                        const targetSocket = Object.values(io.sockets.sockets).find(s => s.username === targetUsername && federatedUserDirectory[targetUserFKey]?.localSocketId === s.id);
+                        if (targetSocket) {
+                            targetSocket.emit('receive_dm', { ...messageObject, conversationId });
+                        }
+                    } else {
+                        // Federate DM to the target's instance
+                        let relayedToPeer = false;
+                        for (const peerAddr in peerSockets) {
+                            const peerSocket = peerSockets[peerAddr];
+                            if (peerSocket && peerSocket.connected && peerSocket.instanceId === targetInstanceId) {
+                                console.log(`Federating DM for ${targetUserFKey} to peer instance ${targetInstanceId} via ${peerAddr}`);
+                                peerSocket.emit('federated_send_dm', {
+                                    originalSenderFKey: senderFKey, // The actual original sender
+                                    targetUserFKey: targetUserFKey, // The final recipient
+                                    messageObject: messageObject // The complete message object
+                                });
+                                relayedToPeer = true;
+                                break;
+                            }
+                        }
+                        if (!relayedToPeer) {
+                            console.warn(`Could not federate DM: Target instance ${targetInstanceId} for ${targetUserFKey} peer not found or disconnected.`);
+                            // Optionally inform sender that user is unreachable if federation fails
+                            socket.emit('dm_error', { message: `User ${targetUserFKey.split('@')[0]} is currently unreachable (instance offline).` });
+                            // To prevent data loss if target instance is temporarily down, we might not remove the message here.
+                            // Or, implement a retry queue or store it as undelivered.
+                            // For now, it's saved, and if the instance comes back & user requests history, they'll get it.
+                        }
+                    }
+
+                    // Send message back to the original sender so their DM window updates
+                    socket.emit('receive_dm', { ...messageObject, conversationId });
+                });
+
+                socket.on('load_dm_history', ({ withUserFKey }) => {
+                    if (!socket.username || socket.username === 'Anonymous') {
+                        socket.emit('dm_error', { message: 'Authentication required.' });
+                        return;
+                    }
+                    if (!withUserFKey) {
+                        socket.emit('dm_error', { message: 'Target user FKey is required.' });
+                        return;
+                    }
+
+                    const currentUserFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+                    const conversationId = getDmConversationId(currentUserFKey, withUserFKey);
+                    const history = directMessages[conversationId] || [];
+                    
+                    socket.emit('dm_history', { withUserFKey, messages: history, conversationId });
+                });
 
                 // WebRTC Signaling Handlers (Phase 1: Intra-Instance)
                 socket.on('webrtc-offer', (data) => {
@@ -1006,11 +1291,14 @@ server.listen(PORT, () => {
 // Save messages periodically and on exit (graceful shutdown)
 setInterval(saveMessages, 60000); // Save every minute
 setInterval(saveGuilds, 70000); // Save guilds periodically (e.g., every 70 seconds)
+setInterval(saveDirectMessages, 75000); // Save DMs periodically
 
 process.on('SIGINT', () => {
     console.log('Server shutting down, saving messages...');
     saveMessages();
     console.log('Saving guilds...');
     saveGuilds();
+    console.log('Saving direct messages...');
+    saveDirectMessages();
     process.exit(0);
 });
