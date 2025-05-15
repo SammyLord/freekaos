@@ -23,6 +23,10 @@ let peerSockets = {}; // To store active outgoing connections to peers { 'addres
 let federatedUserDirectory = {}; // { "username@instanceId": { instanceId: "...", lastSeen: timestamp, localSocketId: "... (if local) } }
 const OUR_INSTANCE_ID = `instance_at_${PORT}`; // Defined earlier for peer handshake
 
+// New: Guilds and Channels
+const GUILDS_FILE = path.join(__dirname, 'guilds.json');
+let guilds = {}; // { guildId: { id, name, ownerFKey, members: [userFKey], channels: { channelId: { id, name, type: 'text', messages: [] } } } }
+
 // Load word blacklist
 function loadWordBlacklist() {
     try {
@@ -159,7 +163,42 @@ function saveMessages() {
     }
 }
 
+// New: Load guilds from file
+function loadGuilds() {
+    try {
+        if (fs.existsSync(GUILDS_FILE)) {
+            const data = fs.readFileSync(GUILDS_FILE, 'utf8');
+            guilds = JSON.parse(data);
+            console.log('Guilds loaded from file.');
+            // Ensure messages arrays exist for channels
+            for (const guildId in guilds) {
+                if (guilds[guildId].channels) {
+                    for (const channelId in guilds[guildId].channels) {
+                        if (!guilds[guildId].channels[channelId].messages) {
+                            guilds[guildId].channels[channelId].messages = [];
+                        }
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error loading guilds:', err);
+        guilds = {};
+    }
+}
+
+// New: Save guilds to file
+function saveGuilds() {
+    try {
+        fs.writeFileSync(GUILDS_FILE, JSON.stringify(guilds, null, 2));
+        // console.log('Guilds saved to file.');
+    } catch (err) {
+        console.error('Error saving guilds:', err);
+    }
+}
+
 loadMessages();
+loadGuilds(); // Load guilds on startup
 
 // Function to broadcast the updated user list
 function broadcastUserList() {
@@ -275,6 +314,46 @@ function addFederatedWebRTCHandlersToPeerSocket(peerSocketConnection, peerInstan
     // e.g., peerSocketConnection.on('federated-call-rejected', (fdata) => { ... });
 }
 
+// New function to handle federated guild-related events from a peer
+function addFederatedGuildHandlersToPeerSocket(peerSocketConnection, peerInstanceId) {
+    console.log(`Adding federated Guild handlers for peer: ${peerInstanceId} (socket: ${peerSocketConnection.id})`);
+
+    peerSocketConnection.on('federated_guild_chat_message', ({ guildId, channelId, messageData }) => {
+        // messageData is { userFKey, username, message, timestamp, instance (origin instance) }
+        console.log(`Received federated_guild_chat_message from peer ${peerInstanceId} for guild ${guildId}, channel ${channelId}`);
+
+        const guild = guilds[guildId];
+        if (!guild) {
+            console.warn(`Federated guild message for non-existent guild ${guildId} from peer ${peerInstanceId}. Ignoring.`);
+            return;
+        }
+        const channel = guild.channels[channelId];
+        if (!channel) {
+            console.warn(`Federated guild message for non-existent channel ${channelId} in guild ${guildId} from peer ${peerInstanceId}. Ignoring.`);
+            return;
+        }
+
+        // Add message to local store for this channel
+        channel.messages.push(messageData);
+        if (channel.messages.length > 100) {
+            channel.messages.shift();
+        }
+        saveGuilds(); // Persist the new message
+
+        // Broadcast to local clients of this instance who are members of this guild
+        Object.values(io.sockets.sockets).forEach(localClientSocket => {
+            if (localClientSocket.username && localClientSocket.username !== 'Anonymous' && !users[localClientSocket.id]?.startsWith('PEER:')) {
+                const localUserFKey = `${localClientSocket.username}@${OUR_INSTANCE_ID}`;
+                if (guild.members.includes(localUserFKey)) {
+                    localClientSocket.emit('new guild chat message', { guildId, channelId, message: messageData });
+                }
+            }
+        });
+    });
+
+    // TODO: Add handlers for other federated guild events (e.g., member join/leave, channel create/delete) if full guild sync is implemented
+}
+
 // Function to attempt connections to all configured peers
 function connectToPeers() {
     console.log('Attempting to connect to configured peers...');
@@ -320,6 +399,7 @@ function connectToPeers() {
             addFederatedWebRTCHandlersToPeerSocket(peerSocket, ackData.instanceId);
             addFederatedUserListHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
             addFederatedChatMessageHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
+            addFederatedGuildHandlersToPeerSocket(peerSocket, ackData.instanceId); // Add guild handlers for outgoing peer
 
             // Send our user list to the newly connected peer
             const localUsersForPeers = {};
@@ -357,10 +437,6 @@ function connectToPeers() {
         });
     });
 }
-
-// function addFederatedWebRTCHandlersToPeerSocket(peerSocketConnection, peerInstanceId) { ... already defined ... }
-// function addFederatedUserListHandlersToPeerSocket(peerSocketConnection, peerInstanceId) { ... to be defined ... }
-// function addFederatedChatMessageHandlersToPeerSocket(peerSocketConnection, peerInstanceId) { ... to be defined ... }
 
 io.on('connection', (socket) => {
     // By default, assume it's a client connection
@@ -406,6 +482,7 @@ io.on('connection', (socket) => {
         addFederatedWebRTCHandlersToPeerSocket(socket, peerAddress); // peerAddress is their instance ID
         addFederatedUserListHandlersToPeerSocket(socket, peerAddress); // Placeholder
         addFederatedChatMessageHandlersToPeerSocket(socket, peerAddress); // Placeholder
+        addFederatedGuildHandlersToPeerSocket(socket, peerAddress); // Add guild handlers for incoming peer
 
         broadcastFederatedUserList(); // Update lists
         socket.emit('peer_handshake_ack', { instanceId: OUR_INSTANCE_ID });
@@ -458,6 +535,167 @@ io.on('connection', (socket) => {
         if (!isBlacklisted) {
             addFederatedWebRTCHandlersToPeerSocket(socket, peerAddress);
         }
+
+        // New Guild/Channel Events
+        socket.on('create guild', ({ guildName }) => {
+            if (isPeer || !socket.username || socket.username === 'Anonymous') {
+                socket.emit('guild creation error', { message: 'Authentication required to create guild.' });
+                return;
+            }
+            if (!guildName || guildName.trim().length < 3) {
+                socket.emit('guild creation error', { message: 'Guild name must be at least 3 characters.' });
+                return;
+            }
+
+            const guildId = `guild_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const creatorFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+            const defaultChannelId = `channel_general_${Date.now()}`;
+
+            const newGuild = {
+                id: guildId,
+                name: guildName.trim(),
+                ownerFKey: creatorFKey,
+                members: [creatorFKey],
+                channels: {
+                    [defaultChannelId]: {
+                        id: defaultChannelId,
+                        name: 'general',
+                        type: 'text',
+                        messages: []
+                    }
+                }
+            };
+            guilds[guildId] = newGuild;
+            saveGuilds();
+            
+            console.log(`User ${creatorFKey} created guild: ${guildName} (ID: ${guildId})`);
+
+            // Notify the creator (and potentially broadcast to others later or send full list)
+            socket.emit('guild created', { guild: newGuild });
+
+            // For now, let's just send the updated list of guilds this user is part of
+            const userGuilds = Object.values(guilds).filter(g => g.members.includes(creatorFKey));
+            socket.emit('update guild list', { guilds: userGuilds });
+        });
+
+        socket.on('create channel', ({ guildId, channelName, channelType = 'text' }) => {
+            if (isPeer || !socket.username || socket.username === 'Anonymous') {
+                socket.emit('channel creation error', { guildId, message: 'Authentication required.' });
+                return;
+            }
+            const userFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+            const guild = guilds[guildId];
+
+            if (!guild) {
+                socket.emit('channel creation error', { guildId, message: 'Guild not found.' });
+                return;
+            }
+            if (guild.ownerFKey !== userFKey) {
+                socket.emit('channel creation error', { guildId, message: 'Only the guild owner can create channels.' });
+                return;
+            }
+            if (!channelName || channelName.trim().length < 1) { // Allow shorter channel names like #g
+                socket.emit('channel creation error', { guildId, message: 'Channel name must be at least 1 character.' });
+                return;
+            }
+            // Prevent duplicate channel names within the same guild (case-insensitive check)
+            const existingChannel = Object.values(guild.channels).find(ch => ch.name.toLowerCase() === channelName.trim().toLowerCase());
+            if (existingChannel) {
+                socket.emit('channel creation error', { guildId, message: `Channel '${channelName.trim()}' already exists in this guild.` });
+                return;
+            }
+
+            const channelId = `channel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const newChannel = {
+                id: channelId,
+                name: channelName.trim(),
+                type: channelType, // For now, only 'text' is truly supported
+                messages: []
+            };
+
+            guild.channels[channelId] = newChannel;
+            saveGuilds();
+
+            console.log(`User ${userFKey} created channel '${newChannel.name}' in guild '${guild.name}' (ID: ${channelId})`);
+            socket.emit('channel created', { guildId: guild.id, channel: newChannel });
+
+            // Notify all members of the guild about the structural update
+            Object.values(io.sockets.sockets).forEach(s => {
+                if (!s.username || s.username === 'Anonymous') return;
+                const memberFKeyLoop = `${s.username}@${OUR_INSTANCE_ID}`;
+                if (guild.members.includes(memberFKeyLoop)) {
+                    s.emit('guild structure updated', { guild });
+                }
+            });
+        });
+
+        socket.on('guild chat message', ({ guildId, channelId, message }) => {
+            if (isPeer || !socket.username || socket.username === 'Anonymous') {
+                // Silently ignore or emit an error, for now ignore for peers
+                if(!isPeer) socket.emit('guild message error', { guildId, channelId, message: 'Authentication required.' });
+                return;
+            }
+            const userFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+            const guild = guilds[guildId];
+
+            if (!guild) {
+                if(!isPeer) socket.emit('guild message error', { guildId, channelId, message: 'Guild not found.' });
+                return;
+            }
+            if (!guild.channels[channelId]) {
+                if(!isPeer) socket.emit('guild message error', { guildId, channelId, message: 'Channel not found.' });
+                return;
+            }
+            if (!guild.members.includes(userFKey)) {
+                 if(!isPeer) socket.emit('guild message error', { guildId, channelId, message: 'You are not a member of this guild.' });
+                return;
+            }
+            if (!message || message.trim() === '') {
+                if(!isPeer) socket.emit('guild message error', { guildId, channelId, message: 'Message cannot be empty.' });
+                return;
+            }
+
+            const originalMessage = message;
+            const censoredText = censorMessage(originalMessage);
+            const messageData = {
+                userFKey: userFKey,
+                username: socket.username, // For convenience on client
+                message: censoredText,
+                timestamp: new Date(),
+                instance: OUR_INSTANCE_ID // Tagging local instance
+            };
+
+            const channelMessages = guild.channels[channelId].messages;
+            channelMessages.push(messageData);
+            if (channelMessages.length > 100) { // Prune to last 100 messages
+                channelMessages.shift();
+            }
+            saveGuilds();
+
+            console.log(`Guild Message in ${guild.name}/${guild.channels[channelId].name} from ${userFKey}: ${censoredText}`);
+
+            // Broadcast to all members of the guild who are on this instance
+            Object.values(io.sockets.sockets).forEach(s => {
+                if (!s.username || s.username === 'Anonymous') return;
+                const memberFKeyLoop = `${s.username}@${OUR_INSTANCE_ID}`;
+                if (guild.members.includes(memberFKeyLoop)) {
+                    s.emit('new guild chat message', { guildId, channelId, message: messageData });
+                }
+            });
+            // TODO: Federate guild chat messages to members on other instances
+            // Federate the guild message to connected peers
+            console.log(`Federating guild message from ${userFKey} in ${guild.name}/${guild.channels[channelId].name} to ${Object.keys(peerSockets).length} peers.`);
+            for (const peerAddr in peerSockets) {
+                if (peerSockets[peerAddr] && peerSockets[peerAddr].connected) {
+                    peerSockets[peerAddr].emit('federated_guild_chat_message', {
+                        guildId,
+                        channelId,
+                        messageData // This already contains userFKey, username, message, timestamp, instance (origin)
+                    });
+                }
+            }
+        });
+
     });
 
     // If it's not identified as a peer after a short timeout, treat as a client.
@@ -767,9 +1005,12 @@ server.listen(PORT, () => {
 
 // Save messages periodically and on exit (graceful shutdown)
 setInterval(saveMessages, 60000); // Save every minute
+setInterval(saveGuilds, 70000); // Save guilds periodically (e.g., every 70 seconds)
 
 process.on('SIGINT', () => {
     console.log('Server shutting down, saving messages...');
     saveMessages();
+    console.log('Saving guilds...');
+    saveGuilds();
     process.exit(0);
 });

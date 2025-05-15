@@ -7,48 +7,94 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Welcome to Freekaos</h1>
-
-    <div id="user-area">
-        Username: <input type="text" id="username-input" placeholder="Enter your username">
-        <button id="set-username-btn">Set Username</button>
-        <p>Current User: <strong id="current-username">Anonymous</strong></p>
-    </div>
-
-    <div id="call-control-area">
-        <h3>Video Call</h3>
-        <input type="text" id="call-target-username" placeholder="Username to call">
-        <button id="initiate-call-btn">Call</button>
-        <button id="answer-call-btn" style="display:none;">Answer</button>
-        <button id="reject-call-btn" style="display:none;">Reject</button>
-        <button id="hang-up-btn" style="display:none;">Hang Up</button>
-        <p id="call-status"></p>
-    </div>
-
-    <div id="video-area" style="display: flex; margin-top: 10px; margin-bottom: 10px;">
-        <div style="margin-right: 10px;">
-            <h4>My Video</h4>
-            <video id="local-video" autoplay muted playsinline width="320" height="240" style="border: 1px solid #ccc;"></video>
+    <div class="container">
+        <div id="username-area">
+            <input id="username-input" placeholder="Enter your username" />
+            <button id="set-username-btn">Set Username</button>
+            <p>Logged in as: <strong id="current-username">Anonymous</strong></p>
         </div>
-        <div>
-            <h4>Remote Video</h4>
-            <video id="remote-video" autoplay playsinline width="320" height="240" style="border: 1px solid #ccc;"></video>
+
+        <div id="main-interface" style="display: flex; height: calc(100vh - 120px);">
+
+            <!-- Guilds Column -->
+            <div id="guilds-column" style="width: 150px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto;">
+                <h2>Guilds</h2>
+                <ul id="guild-list">
+                    <!-- Guilds will be listed here -->
+                </ul>
+                <div id="create-guild-area">
+                    <input id="guild-name-input" placeholder="New guild name" />
+                    <button id="create-guild-btn">Create Guild</button>
+                </div>
+            </div>
+
+            <!-- Channels Column -->
+            <div id="channels-column" style="width: 200px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto; display: none;">
+                <h2 id="channels-header">Channels</h2>
+                <ul id="channel-list">
+                    <!-- Channels for selected guild -->
+                </ul>
+                <div id="create-channel-area" style="display: none;">
+                    <input id="channel-name-input" placeholder="New channel name" />
+                    <button id="create-channel-btn">Create Channel</button>
+                </div>
+            </div>
+            
+            <!-- Main Chat / Guild Chat Column -->
+            <div id="chat-column" style="flex: 1; display: flex; flex-direction: column; padding-left: 10px;">
+                <div id="chat-view-selector" style="padding-bottom: 10px; border-bottom: 1px solid #ccc; margin-bottom:10px;">
+                    <button id="show-global-chat-btn" class="active-view">Global Chat</button>
+                    <button id="show-guild-chat-btn">Guild Chat</button>
+                </div>
+
+                <!-- Global Chat Area (existing) -->
+                <div id="global-chat-area">
+                    <ul id="messages"></ul>
+                    <form id="form" action="">
+                        <input id="input" autocomplete="off" /><button>Send</button>
+                    </form>
+                </div>
+
+                <!-- Guild Chat Area (new) -->
+                <div id="guild-chat-area" style="display: none; flex: 1; display: flex; flex-direction: column;">
+                    <h3 id="guild-chat-header">Select a guild and channel</h3>
+                    <ul id="guild-messages" style="list-style-type: none; margin: 0; padding: 0; overflow-y: auto; flex-grow: 1; border-bottom: 1px solid #eee;"></ul>
+                    <form id="guild-chat-form" action="" style="padding: 10px 0;">
+                        <input id="guild-chat-input" autocomplete="off" placeholder="Message in channel..."/><button>Send</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- User List Column (existing) -->
+            <div id="user-list-column" style="width: 200px; border-left: 1px solid #ccc; padding: 10px; overflow-y: auto;">
+                <h2>Users Online</h2>
+                <ul id="user-list"></ul>
+            </div>
+        </div>
+
+        <!-- Video Call Elements (existing, might need repositioning later) -->
+        <div id="video-call-area" style="padding:10px; border-top: 1px solid #ccc; margin-top:10px;">
+            <h2>Video Call</h2>
+            <div id="call-controls">
+                <input id="call-target-username" placeholder="Username to call">
+                <button id="initiate-call-btn">Call</button>
+                <button id="answer-call-btn" style="display:none;">Answer</button>
+                <button id="reject-call-btn" style="display:none;">Reject</button>
+                <button id="hang-up-btn" style="display:none;">Hang Up</button>
+            </div>
+            <p id="call-status">Ready to call.</p>
+            <div id="video-streams" style="display: flex; justify-content: space-around; margin-top:10px;">
+                <div>
+                    <p>My Video:</p>
+                    <video id="local-video" autoplay muted playsinline style="width:200px; height:150px; border:1px solid black;"></video>
+                </div>
+                <div>
+                    <p>Their Video:</p>
+                    <video id="remote-video" autoplay playsinline style="width:200px; height:150px; border:1px solid black;"></video>
+                </div>
+            </div>
         </div>
     </div>
-
-    <div id="main-content-area" style="display: flex; width: 90%; max-width: 1000px; height: 60vh;">
-        <div id="user-list-container">
-            <h3>Users Online</h3>
-            <ul id="user-list"></ul>
-        </div>
-        <div id="chat-container" style="flex-grow: 1; margin-left: 20px;">
-            <ul id="messages"></ul>
-            <form id="form" action="">
-                <input id="input" autocomplete="off" /><button>Send</button>
-            </form>
-        </div>
-    </div>
-
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
