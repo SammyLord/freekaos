@@ -7,16 +7,22 @@ Freekaos aims to be a decentralized communication platform, similar in spirit to
 *   **Server & Client Architecture:**
     *   Node.js backend using Express.js and Socket.IO.
     *   Frontend built with HTML, CSS, and vanilla JavaScript, served by the Node.js server.
-*   **Real-time Chat:**
-    *   Text-based chat rooms.
+*   **Real-time Chat (Global):**
+    *   Text-based global chat room.
     *   Usernames for identification.
     *   Message persistence: Chat history is saved on the server (`messages.json`) and loaded on startup (prunes to the last 100 messages). Timestamps are included.
 *   **User Management (Basic):**
     *   Users can set a username.
     *   Display of connected users (local and federated).
+*   **Guilds and Channels (Work in Progress):**
+    *   **Guild Creation:** Users can create new guilds. Each new guild gets a default `#general` text channel.
+    *   **Channel Creation:** Guild owners can create additional text channels within their guilds.
+    *   **Guild Chat:** Users can send and receive messages within specific guild channels they are part of.
+    *   **Persistence:** Guild structures, channels, and their messages are saved on the server (`guilds.json`).
+    *   **Basic Message Federation:** Messages sent in guild channels are federated to directly connected peer instances. (Full guild structure/membership federation is a future enhancement).
 *   **Federation & P2P Communication:**
     *   **Inter-Instance Connection:** Instances can connect to each other as peers based on a manual `peer_list.txt`.
-    *   **Federated Chat:** Messages from local clients are relayed to connected peer instances and displayed to their clients, indicating the origin instance.
+    *   **Federated Global Chat:** Global chat messages from local clients are relayed to connected peer instances and displayed to their clients, indicating the origin instance.
     *   **Federated User List:** User lists are shared between connected instances.
 *   **Administrative Controls:**
     *   **Word Blacklist:** Instance administrators can define a list of words/phrases in `word_blacklist.txt` that will be censored in chat messages.
@@ -36,7 +42,8 @@ freekaos/
 │   └── package.json              # Client-side dependencies (e.g., socket.io-client)
 ├── server/                       # Backend application
 │   ├── index.js                  # Main server logic
-│   ├── messages.json             # Stores chat message history
+│   ├── messages.json             # Stores global chat message history
+│   ├── guilds.json               # Stores guild and channel data, including messages
 │   ├── package.json              # Server-side dependencies (e.g., express, socket.io)
 │   └── config/                   # Server configuration files
 │       ├── instance_blacklist.txt  # List of banned instance hostnames/IPs
@@ -116,13 +123,16 @@ Once the server is running (e.g., on `http://localhost:3001`):
 
 ## Current Status & Next Steps
 
-The core functionality for chat, user lists, basic administration, and federated communication (including WebRTC signaling) is in place.
-The immediate next step would be to thoroughly test the federated WebRTC call features, including call rejection, hang-ups, and busy states across instances.
+The core functionality for global chat, user lists, basic administration, and federated communication (including WebRTC signaling and basic guild message federation) is in place. Foundational server-side and client-side elements for Guilds and Channels (creation, channel management, messaging) have been implemented.
+
+The immediate next steps include:
+*   Thoroughly testing the federated WebRTC call features and the new Guild/Channel functionalities.
+*   Refining client-side UI/UX for guilds and channels, especially owner-specific controls and unread message indicators.
 
 Further development could include:
 *   User accounts with persistent identities (beyond session-based usernames).
-*   Group chats and guilds.
-*   Friend systems.
+*   Full federation of guild structures (creation, deletion, channel changes) and memberships across instances.
+*   Inviting users to guilds (including users on federated instances).
 *   More robust error handling and UI/UX improvements.
 *   Encryption for messages and calls.
 *   A more dynamic peer discovery mechanism instead of a manual `peer_list.txt`. 
