@@ -1,4 +1,5 @@
 # freekaos: A Decentralized Communication Platform
+***(Pronounced like "Free Chaos")***
 
 Freekaos aims to be a decentralized communication platform, similar in spirit to Discord, built with Node.js for both the server and client-side (utilizing plain HTML, CSS, and JavaScript). It emphasizes inter-instance communication and user control over data.
 
