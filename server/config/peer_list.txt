@@ -1,0 +1,4 @@
+# Add peer instance addresses here, one per line.
+# Example: 
+# localhost:3002
+# freekaos-peer.example.com:3001 
