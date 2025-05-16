@@ -1,413 +1,579 @@
+/* Basic Reset & Dark Theme Variables */
 :root {
-    --primary-color: #007bff;
-    --primary-hover-color: #0056b3;
-    --background-color: #f8f9fa;
-    --container-bg-color: #ffffff;
-    --border-color: #dee2e6;
-    --text-color: #212529;
-    --secondary-text-color: #6c757d;
-    --light-bg: #f1f3f5;
-    --selected-item-bg: var(--primary-color);
-    --selected-item-text: #ffffff;
-    --hover-item-bg: #e9ecef;
-    --button-text-color: #ffffff;
-    --disabled-bg-color: #ced4da;
-    --disabled-text-color: #6c757d;
-    --error-color: #dc3545;
+    --primary-bg: #36393f;
+    --secondary-bg: #2f3136;
+    --tertiary-bg: #202225;
+    --primary-text: #dcddde;
+    --secondary-text: #b9bbbe;
+    --tertiary-text: #72767d;
+    --interactive-normal: #b9bbbe;
+    --interactive-hover: #dcddde;
+    --interactive-active: #ffffff;
+    --accent-color: #7289da; /* Discord purple/blurple */
+    --accent-hover: #677bc4;
+    --success-color: #43b581;
+    --error-color: #f04747;
+    --border-color: #202225; /* Often same as tertiary for seamless panels */
+    --scrollbar-thumb-bg: var(--tertiary-bg);
+    --scrollbar-track-bg: var(--secondary-bg);
+    --unread-marker: var(--accent-color);
+    --mention-bg: rgba(114, 137, 218, 0.2); /* Light background for mentions */
+    --hover-item-bg: rgba(114, 137, 218, 0.1);
+    --selected-item-bg: rgba(114, 137, 218, 0.2);
+    --input-bg: var(--tertiary-bg);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    margin: 0;
-    padding: 0; /* Removed default padding, container will handle it */
-    background-color: var(--background-color);
-    color: var(--text-color);
-    display: flex; /* Using flex for overall page structure */
-    justify-content: center; /* Center the main container */
-    min-height: 100vh;
-    font-size: 16px;
-    line-height: 1.5;
+    font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif; /* Discord-like font stack */
+    background-color: var(--primary-bg);
+    color: var(--primary-text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden; /* Prevent body scroll, handle scrolling in panels */
 }
 
-.container {
+/* App Container - Main Flex Layout */
+.app-container {
+    display: flex;
     width: 100%;
-    max-width: 1600px; /* Max width for the entire app */
-    height: 100vh; /* Full viewport height */
+    height: 100%;
+}
+
+/* Guilds Navigation (Far Left) */
+#guilds-nav {
+    width: 72px;
+    background-color: var(--tertiary-bg);
+    padding: 12px 0;
     display: flex;
     flex-direction: column;
-    background-color: var(--container-bg-color);
-    box-shadow: 0 0 15px rgba(0,0,0,0.1);
-    overflow: hidden; /* Prevent scrollbars on body due to full height */
+    align-items: center;
+    overflow-y: auto; /* In case of many guilds */
+    scrollbar-width: none; /* Firefox */
+}
+#guilds-nav::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+
+#guild-list {
+    list-style: none;
+    width: 100%;
 }
 
-#username-area {
-    padding: 15px 20px;
-    border-bottom: 1px solid var(--border-color);
-    background-color: var(--light-bg);
+.guild-item {
+    width: 48px;
+    height: 48px;
+    background-color: var(--primary-bg);
+    border-radius: 50%;
+    margin: 0 auto 8px auto;
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    font-weight: bold;
+    cursor: pointer;
+    transition: border-radius 0.15s ease-out, background-color 0.15s ease-out;
+    position: relative; /* For notification dots or selection indicators */
+    overflow: hidden; /* If using images */
 }
 
-#username-area input[type="text"] {
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    flex-grow: 1;
-    max-width: 300px;
+.guild-item:hover {
+    border-radius: 16px;
+    background-color: var(--accent-color);
 }
 
-#username-area p {
-    margin: 0;
-    font-size: 0.9em;
-    color: var(--secondary-text-color);
+.guild-item.selected-guild {
+    border-radius: 16px;
+    background-color: var(--accent-color);
+    /* Add a little indicator bar on the left if desired */
+    /* position: relative; */
 }
-#username-area p strong {
-    color: var(--primary-color);
-}
+/* .guild-item.selected-guild::before { 
+    content: ''; 
+    position: absolute; 
+    left: -8px; 
+    top: 50%; transform: translateY(-50%); 
+    width: 4px; height: 20px; 
+    background-color: white; 
+    border-radius: 0 4px 4px 0; 
+} */
 
-#main-interface {
-    display: flex;
-    flex-grow: 1; /* Takes up remaining vertical space */
-    overflow-y: hidden; /* Prevent this level from scrolling, columns will scroll */
-    border-bottom: 1px solid var(--border-color);
-}
-
-/* Column Styles */
-#guilds-column, #channels-column, #user-list-column {
-    padding: 15px;
-    overflow-y: auto;
-    background-color: var(--light-bg); /* Lighter background for side columns */
-    border-right: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-}
-#guilds-column { width: 200px; }
-#channels-column { width: 240px; }
-#user-list-column { width: 200px; border-right: none; border-left: 1px solid var(--border-color); }
-
-#guilds-column h2, #channels-column h2, #user-list-column h2 {
-    font-size: 1.1em;
-    margin-top: 0;
-    margin-bottom: 10px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--secondary-text-color);
-}
-#channels-header { /* Specific ID for channels header */
-    color: var(--secondary-text-color); /* Consistency with other h2s */
-}
-
-#chat-column {
-    flex: 1; /* Takes remaining horizontal space */
-    display: flex;
-    flex-direction: column;
-    padding: 0; /* Remove padding, internal elements will manage */
-    background-color: var(--container-bg-color); /* Main chat area background */
-}
-
-#chat-view-selector {
-    padding: 10px 15px;
-    border-bottom: 1px solid var(--border-color);
-    background-color: var(--light-bg);
-    display: flex;
-    gap: 10px;
-}
-
-#chat-view-selector button {
-    padding: 6px 12px;
-    font-size: 0.9em;
-    background-color: transparent;
-    color: var(--secondary-text-color);
-    border: 1px solid var(--border-color);
-}
-
-#chat-view-selector button.active-view {
-    background-color: var(--primary-color);
-    color: var(--button-text-color);
-    border-color: var(--primary-color);
-}
-
-/* Message Lists (Global and Guild) */
-#messages, #guild-messages {
-    list-style-type: none;
-    margin: 0;
-    padding: 15px;
-    overflow-y: auto;
-    flex-grow: 1;
-}
-
-#messages li, #guild-messages li {
-    padding: 8px 12px;
-    margin-bottom: 8px;
-    border-radius: 4px;
-    line-height: 1.4;
-    word-wrap: break-word;
-}
-/* Removing alternating backgrounds for a cleaner look */
-/* #messages li:nth-child(odd) { background-color: #e9e9e9; } */
-
-/* Forms (Global and Guild Chat) */
-#form, #guild-chat-form {
-    display: flex;
-    padding: 15px;
-    border-top: 1px solid var(--border-color);
-    background-color: var(--light-bg);
-    gap: 10px;
-}
-
-#input, #guild-chat-input {
-    flex-grow: 1;
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-}
-#input:focus, #guild-chat-input:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(0,123,255,.25);
-}
-
-/* General Button Styles */
-button {
-    padding: 10px 15px;
-    font-size: 0.95em;
-    background-color: var(--primary-color);
-    color: var(--button-text-color);
+.guild-actions button {
+    width: 48px;
+    height: 48px;
+    background-color: var(--primary-bg);
+    color: var(--success-color);
     border: none;
-    border-radius: 4px;
+    border-radius: 50%;
+    font-size: 24px;
     cursor: pointer;
-    transition: background-color 0.2s ease-in-out;
+    margin: 8px auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-radius 0.15s ease-out, background-color 0.15s ease-out;
 }
-button:hover {
-    background-color: var(--primary-hover-color);
-}
-button:disabled {
-    background-color: var(--disabled-bg-color);
-    color: var(--disabled-text-color);
-    cursor: not-allowed;
-}
-button:disabled:hover {
-    background-color: var(--disabled-bg-color); /* Prevent hover effect on disabled */
+.guild-actions button:hover {
+    border-radius: 16px;
+    background-color: var(--success-color);
+    color: white;
 }
 
-/* Lists in side columns (Guilds, Channels, Users) */
-#guild-list, #channel-list, #user-list {
-    list-style-type: none;
-    padding: 0;
-    margin: 0;
-    flex-grow: 1; /* Allow lists to fill space in column */
+/* Secondary Panel (Channels, DMs, User Info) */
+#secondary-panel {
+    width: 240px;
+    background-color: var(--secondary-bg);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
 }
 
-#guild-list li, #channel-list li, #user-list li {
-    padding: 10px 8px;
-    cursor: pointer;
+#secondary-panel-header {
+    padding: 0 16px;
+    height: 50px; /* Standard header height */
+    display: flex;
+    align-items: center;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+#current-context-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--primary-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.9em;
-    transition: background-color 0.15s ease-in-out;
-}
-#guild-list li:last-child, #channel-list li:last-child, #user-list li:last-child {
-    border-bottom: none;
 }
 
-#guild-list li:hover, #channel-list li:hover, #user-list li:hover {
-    background-color: var(--hover-item-bg);
+#channels-list-container, #dm-list-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-track-bg);
 }
-
-#guild-list li.selected-guild, #channel-list li.selected-channel {
-    background-color: var(--selected-item-bg);
-    color: var(--selected-item-text);
-    font-weight: bold;
+#channels-list-container::-webkit-scrollbar, #dm-list-container::-webkit-scrollbar {
+    width: 8px;
 }
-#guild-list li.selected-guild:hover, #channel-list li.selected-channel:hover {
-    background-color: var(--selected-item-bg); /* Keep selected color on hover */
-}
-
-/* Input areas within columns */
-#create-guild-area, #join-guild-area, #create-channel-area, #guild-actions-area {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px dashed var(--border-color); /* Dashed for visual distinction */
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-#create-guild-area input, #join-guild-area input, #create-channel-area input, #generated-invite-code-display {
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
+#channels-list-container::-webkit-scrollbar-thumb, #dm-list-container::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-bg);
     border-radius: 4px;
-    width: calc(100% - 24px); /* Account for padding */
 }
-#generated-invite-code-display {
-    background-color: #e9ecef; /* Readonly field style */
-    text-align: center;
-    font-weight: bold;
+#channels-list-container::-webkit-scrollbar-track, #dm-list-container::-webkit-scrollbar-track {
+    background-color: var(--scrollbar-track-bg);
 }
 
-#guild-chat-header {
-    padding: 10px 15px;
-    font-size: 1em;
-    color: var(--secondary-text-color);
-    background-color: var(--light-bg); /* Consistent with other headers */
-    margin:0;
+#channel-list, #dm-list /* (future DM list) */ {
+    list-style: none;
+    padding: 0 8px 0 16px; /* Indent channel names */
 }
 
-/* Video Call Area */
-#video-call-area {
-    padding: 15px 20px;
-    border-top: 1px solid var(--border-color);
-    background-color: var(--light-bg);
+#channel-list li, #dm-list li {
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--secondary-text);
+    font-weight: 500;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-#video-call-area h2 {
-    margin-top:0;
-    font-size: 1.1em;
-    color: var(--secondary-text-color);
-    margin-bottom: 10px;
+#channel-list li:hover, #dm-list li:hover {
+    background-color: var(--hover-item-bg);
+    color: var(--interactive-hover);
 }
-#call-controls {
+#channel-list li.selected-channel, #dm-list li.selected-dm {
+    background-color: var(--selected-item-bg);
+    color: var(--interactive-active);
+}
+
+/* Channel/Guild Actions styling */
+#channel-actions-container, #guild-invite-area {
+    padding: 8px 16px;
+    margin-top: 8px;
+    border-top: 1px solid var(--tertiary-bg);
+}
+#create-channel-area input, #guild-invite-area input {
+    width: calc(100% - 10px);
+    margin-bottom: 5px;
+}
+
+/* User Info Panel at the bottom of secondary-panel */
+#user-info-panel {
+    background-color: rgba(0,0,0,0.1); /* Slightly darker shade */
+    padding: 8px 10px;
+    height: 52px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap; /* Allow controls to wrap on smaller screens */
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
-#call-controls input[type="text"] {
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
+#user-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+#current-username {
+    font-weight: 600;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px; /* Adjust as needed */
+}
+#username-settings-btn {
+    background: none;
+    border: none;
+    color: var(--interactive-normal);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+}
+#username-settings-btn:hover {
+    color: var(--interactive-hover);
+}
+
+/* Main Chat Content Area */
+#chat-main {
     flex-grow: 1;
-    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--primary-bg);
+    overflow: hidden; /* Important */
 }
-#call-status {
-    margin-top: 10px;
-    font-size: 0.9em;
-    color: var(--secondary-text-color);
+
+#chat-main-header {
+    height: 50px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+#chat-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#messages-container {
+    flex-grow: 1;
+    overflow-y: auto; /* Scrollbar for messages */
+    padding: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-track-bg);
+}
+#messages-container::-webkit-scrollbar {
+    width: 8px;
+}
+#messages-container::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-bg);
+    border-radius: 4px;
+}
+
+.chat-area {
+    display: none; /* Hidden by default, script will show active one */
+    height: 100%; /* Fill messages-container */
+}
+.chat-area.active-chat {
+    display: block;
+}
+
+.message-list {
+    list-style-type: none;
+}
+
+.message-list li {
+    padding: 8px 0; /* More vertical padding for messages */
+    margin-bottom: 4px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    /* Styles for sender, timestamp, etc. will be added here */
+}
+.message-list li strong { /* Username */
+    color: var(--interactive-hover); 
+    font-weight: 500;
+    margin-right: 8px;
+}
+.message-list li .timestamp {
+    font-size: 0.75rem; /* 12px */
+    color: var(--tertiary-text);
+    margin-right: 8px;
+}
+.message-list li .instance-tag {
+    font-size: 0.7rem;
+    color: var(--tertiary-text);
+    background-color: rgba(0,0,0,0.1);
+    padding: 1px 3px;
+    border-radius: 3px;
+    margin-left: 5px;
+}
+
+/* DM Specific Message Styling */
+#dm-messages li.dm-message-sent {
+    /* text-align: right; remove this for bubble effect */
+}
+#dm-messages li.dm-message-sent .message-content-wrapper {
+    background-color: var(--accent-color); 
+    color: white;
+    margin-left: auto; 
+    border-radius: 18px 18px 4px 18px;
+    padding: 8px 12px;
+    max-width: 70%;
+    display: inline-block; /* to allow margin-left: auto */
+}
+#dm-messages li.dm-message-received .message-content-wrapper {
+    background-color: var(--secondary-bg); 
+    margin-right: auto; 
+    border-radius: 18px 18px 18px 4px;
+    padding: 8px 12px;
+    max-width: 70%;
+    display: inline-block;
+}
+/* Wrapper for DM messages to apply bubble styles */
+.message-list li .message-content-wrapper { 
+    /* Base for future global styling if needed */
+}
+
+
+#chat-input-area {
+    padding: 0 16px 16px 16px; /* Padding around the form */
+    background-color: var(--primary-bg);
+    flex-shrink: 0;
+}
+
+.message-form {
+    display: none; /* Hidden by default */
+    width: 100%;
+    background-color: var(--input-bg);
+    border-radius: 8px;
+    padding: 0; /* Remove padding if input has its own */
+    flex-direction: row; /* For button alignment if needed */
+}
+.message-form.active-form {
+    display: flex; 
+}
+
+.message-input {
+    flex-grow: 1;
+    border: none;
+    padding: 12px;
+    background-color: transparent;
+    color: var(--primary-text);
+    outline: none;
+    font-size: 15px;
+    border-radius: 8px 0 0 8px; /* If button is separate */
+}
+.message-form button {
+    background-color: transparent; /* Or var(--accent-color) */
+    color: var(--interactive-normal);
+    border: none;
+    padding: 0 12px;
+    cursor: pointer;
+    font-weight: 500;
+    border-radius: 0 8px 8px 0;
+    font-size: 15px;
+}
+.message-form button:hover {
+    color: var(--interactive-hover);
+}
+
+/* User List Panel (Far Right) */
+#user-list-panel {
+    width: 240px;
+    background-color: var(--secondary-bg);
+    border-left: 1px solid var(--border-color);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex; /* default, can be changed by script */
+    flex-direction: column;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-bg) var(--scrollbar-track-bg);
+}
+#user-list-panel::-webkit-scrollbar {
+    width: 8px;
+}
+#user-list-panel::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-bg);
+    border-radius: 4px;
+}
+#user-list-panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--secondary-text);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+#user-list {
+    list-style: none;
+}
+#user-list li {
+    padding: 6px 0;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--secondary-text);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#user-list li:hover {
+    background-color: var(--hover-item-bg);
+    color: var(--interactive-hover);
+}
+#user-list li.current-user-self {
+    color: var(--primary-text);
+    font-weight: bold;
+}
+#user-list li .instance-tag {
+    font-size: 0.7rem;
+    opacity: 0.6;
+}
+
+/* Modals Styling */
+.modal {
+    display: none; /* Hidden by default */
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.6); /* Darker overlay */
+    align-items: center;
+    justify-content: center;
+}
+.modal.active-modal {
+    display: flex; /* Use flex to center content */
+}
+
+.modal-content {
+    background-color: var(--secondary-bg);
+    margin: auto;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px; /* Default max width */
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    color: var(--primary-text);
+}
+.modal-content.wide-modal {
+    max-width: 700px; /* For video call */
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: var(--primary-text);
+}
+.modal-content input[type="text"], .modal-content input[type="password"] {
+    width: calc(100% - 24px);
+    padding: 10px;
+    margin-bottom: 15px;
+    background-color: var(--input-bg);
+    border: 1px solid var(--tertiary-bg);
+    border-radius: 4px;
+    color: var(--primary-text);
+}
+.modal-content button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background-color: var(--accent-color);
+    color: white;
+    font-weight: 500;
+    margin-right: 8px;
+}
+.modal-content button:hover {
+    background-color: var(--accent-hover);
+}
+.modal-content button.close-modal-btn {
+    background-color: var(--tertiary-text);
+}
+.modal-content button.close-modal-btn:hover {
+    background-color: var(--secondary-text);
+}
+
+/* Video Call Specific Styling */
+#video-call-container {
+    /* Uses .modal styles for now */
 }
 #video-streams {
     display: flex;
     justify-content: space-around;
-    margin-top: 15px;
-    gap: 15px;
+    margin-top: 10px;
 }
-#video-streams div {
-    flex: 1;
-    min-width: 150px; /* Prevent videos from becoming too small */
-}
-#video-streams p {
-    margin-top: 0;
-    margin-bottom: 5px;
-    font-size: 0.85em;
-    text-align: center;
-}
-#local-video, #remote-video {
-    width: 100%;
-    height: auto; /* Maintain aspect ratio */
-    max-height: 200px; /* Limit video height */
-    border: 1px solid var(--border-color);
-    background-color: #333;
+#video-streams video {
+    width: 300px; /* Adjust as needed */
+    height: 225px;
+    background-color: black;
+    border: 1px solid var(--tertiary-bg);
     border-radius: 4px;
 }
+#call-controls input {
+     width: auto; /* Override modal input width for this specific input */
+     margin-right: 8px;
+}
 
-/* Utility class for hiding elements */
+/* Helper classes */
 .hidden {
     display: none !important;
 }
 
-/* Styling for the initial username input state when it's the main focus */
-body:not(.username-set) #username-area {
-    /* Could add more prominent styling if desired when username is not set */
+/* Unread Indicators */
+.has-unread {
+    position: relative;
 }
-
-/* Global Chat specific styling (if any needed beyond general #messages) */
-#global-chat-area {
-    display: flex; /* To make ul#messages grow */
-    flex-direction: column;
-    flex-grow: 1;
-    overflow: hidden; /* Contains the scrolling #messages */
-}
-
-/* Guild Chat specific styling */
-#guild-chat-area {
-    /* display: none; set by JS */
-    /* flex: 1; set by JS */
-    display: flex; /* Needs to be flex for internal growth */
-    flex-direction: column;
-    flex-grow:1; /* Ensure it grows */
-    overflow: hidden;
-}
-
-/* Adjustments for inline styles that were previously in HTML */
-/* Ensure these are covered or replaced if the inline styles are removed */
-#channels-column { /* was display: none; */
-    /* display: none; - JS will handle this */
-}
-#create-channel-area { /* was display: none; */
-    /* display: none; - JS will handle this */
-}
-#generate-invite-btn, #generated-invite-code-display { /* was display:none; */
-    /* display: none; - JS will handle this */
-}
-#guild-chat-area { /* was display: none; flex: 1; display: flex; flex-direction: column; */
-    /* display: none; - JS will handle this */
-}
-#answer-call-btn, #reject-call-btn, #hang-up-btn { /* was display:none; */
-    /* display: none; - JS will handle this */
-}
-
-/* Styles for DM messages and current user in user list */
-#user-list li.current-user-self {
-    font-style: italic;
-    color: var(--primary-color);
-    font-weight: bold;
-    background-color: var(--hover-item-bg);
-}
-
-#dm-messages li {
-    padding: 8px 12px;
-    margin-bottom: 5px;
-    word-wrap: break-word;
-    max-width: 70%;
-    border-radius: 10px;
-}
-
-#dm-messages li.dm-message-sent {
-    background-color: #dcf8c6; /* A light green, typical for sent messages */
-    margin-left: auto; /* Align to right */
-    border-radius: 10px 10px 0 10px; /* Bubble tail on bottom-left for sent */
-}
-
-#dm-messages li.dm-message-received {
-    background-color: #f1f0f0; /* A light grey for received */
-    margin-right: auto; /* Align to left */
-    border-radius: 10px 10px 10px 0; /* Bubble tail on bottom-right for received */
-}
-
-/* Unread DM Indicators */
-#chat-view-selector button.has-unread {
-    font-weight: bold;
-    position: relative; /* For positioning the dot */
-}
-
-#chat-view-selector button.has-unread::after {
-    content: '●'; /* Unicode dot character */
-    font-size: 12px; /* Adjust size of the dot */
-    color: var(--error-color); /* Use a distinct color, like error or a bright notification color */
+.has-unread::before { /* Dot on DM tab or guild icon */
+    content: '';
     position: absolute;
-    top: 2px; /* Adjust position as needed */
-    right: 5px; /* Adjust position as needed */
+    top: 8px;
+    right: 8px; 
+    width: 8px;
+    height: 8px;
+    background-color: var(--unread-marker);
+    border-radius: 50%;
+    border: 2px solid var(--secondary-bg); /* To make it pop from background */
+}
+#guilds-nav .guild-item.has-unread::before { /* Guild specific dot */
+    top: 4px;
+    left: 4px; /* Top-left for guild icons often looks good */
+    border: 2px solid var(--tertiary-bg);
 }
 
 #user-list li.has-unread-dm {
-    font-weight: bold; /* Make username bold */
-    position: relative; /* For positioning the dot */
+    font-weight: bold;
+    color: var(--interactive-hover); /* Make user stand out */
+}
+#user-list li.has-unread-dm::after { /* Dot next to user name */
+    content: '●';
+    color: var(--unread-marker);
+    font-size: 10px;
+    margin-left: 8px;
 }
 
-#user-list li.has-unread-dm::before {
-    content: '●';
-    font-size: 10px;
-    color: var(--primary-color);
-    margin-right: 6px;
-    /* Optional: absolute positioning if more control needed relative to the li */
+.small-btn {
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+/* Buttons that are part of headers or specific areas */
+#dm-call-user-btn {
+    background-color: var(--success-color);
+    color: white;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+}
+#dm-call-user-btn:hover {
+    background-color: #3aa070;
 } 

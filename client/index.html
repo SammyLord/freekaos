@@ -7,118 +7,151 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <div id="username-area">
-            <input id="username-input" placeholder="Enter your username" />
-            <button id="set-username-btn">Set Username</button>
-            <p>Logged in as: <strong id="current-username">Anonymous</strong></p>
-        </div>
+    <div class="app-container">
 
-        <div id="main-interface" style="display: flex; height: calc(100vh - 120px);">
-
-            <!-- Guilds Column -->
-            <div id="guilds-column" style="width: 150px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto;">
-                <h2>Guilds</h2>
-                <ul id="guild-list">
-                    <!-- Guilds will be listed here -->
-                </ul>
-                <div id="create-guild-area">
-                    <input id="guild-name-input" placeholder="New guild name" />
-                    <button id="create-guild-btn">Create Guild</button>
-                </div>
-                <div id="join-guild-area" style="margin-top: 15px; padding-top: 10px; border-top: 1px dashed #ccc;">
-                    <input id="join-guild-code-input" placeholder="Enter invite code" />
-                    <button id="join-guild-btn">Join with Code</button>
-                </div>
+        <!-- Guilds Navigation Column (Far Left) -->
+        <nav id="guilds-nav">
+            <ul id="guild-list">
+                <!-- Guild "icons" will be dynamically added here -->
+                <!-- Example: <li class="guild-item" data-guild-id="1">G1</li> -->
+            </ul>
+            <div class="guild-actions">
+                <button id="create-guild-modal-btn" title="Create Guild">+</button> 
+                <button id="join-guild-modal-btn" title="Join Guild">#</button>
             </div>
+        </nav>
 
-            <!-- Channels Column -->
-            <div id="channels-column" style="width: 200px; border-right: 1px solid #ccc; padding: 10px; overflow-y: auto; display: none;">
-                <h2 id="channels-header">Channels</h2>
-                <div id="guild-actions-area" style="margin-bottom:10px; padding-bottom:10px; border-bottom: 1px dashed #ccc;">
-                    <button id="generate-invite-btn" style="display:none; width:100%; margin-bottom:5px;">Generate Invite</button>
-                    <input type="text" id="generated-invite-code-display" readonly style="width:calc(100% - 12px); display:none; margin-bottom:5px; background-color:#eee; text-align:center;" />
-                </div>
+        <!-- Secondary Panel (Channels, DMs, User Info) -->
+        <aside id="secondary-panel">
+            <div class="panel-header">
+                <h2 id="current-context-name">Channels / Info</h2>
+            </div>
+            <div id="channels-list-container">
                 <ul id="channel-list">
-                    <!-- Channels for selected guild -->
+                    <!-- Channels will be populated here -->
                 </ul>
                 <div id="create-channel-area" style="display: none;">
-                    <input id="channel-name-input" placeholder="New channel name" />
-                    <button id="create-channel-btn">Create Channel</button>
+                    <input type="text" id="channel-name-input" placeholder="New channel name...">
+                    <button id="create-channel-btn" class="panel-button">Create Channel</button>
+                </div>
+                <div id="guild-invite-area" style="display:none;">
+                    <button id="generate-invite-btn" class="panel-button">Generate Invite</button>
+                    <input type="text" id="generated-invite-code-display" readonly placeholder="Invite code...">
                 </div>
             </div>
-            
-            <!-- Main Chat / Guild Chat Column -->
-            <div id="chat-column" style="flex: 1; display: flex; flex-direction: column; padding-left: 10px;">
-                <div id="chat-view-selector" style="padding-bottom: 10px; border-bottom: 1px solid #ccc; margin-bottom:10px;">
-                    <button id="show-global-chat-btn" class="active-view">Global Chat</button>
-                    <button id="show-guild-chat-btn">Guild Chat</button>
-                    <button id="show-dm-chat-btn">Direct Messages</button>
-                </div>
+            <div id="dm-list-container" style="display: none;">
+                <!-- DM list or info will appear here when Home/Global is selected -->
+            </div>
 
-                <!-- Global Chat Area (existing) -->
-                <div id="global-chat-area">
-                    <ul id="messages"></ul>
-                    <form id="form" action="">
-                        <input id="input" autocomplete="off" /><button>Send</button>
-                    </form>
-                </div>
+            <div id="user-info-panel">
+                <div id="current-username">Anonymous</div>
+                <button id="username-settings-btn" class="icon-button" aria-label="Settings"><i class="fas fa-cog"></i></button>
+            </div>
+        </aside>
 
-                <!-- Guild Chat Area (new) -->
-                <div id="guild-chat-area" style="display: none; flex: 1; display: flex; flex-direction: column;">
-                    <h3 id="guild-chat-header">Select a guild and channel</h3>
-                    <ul id="guild-messages" style="list-style-type: none; margin: 0; padding: 0; overflow-y: auto; flex-grow: 1; border-bottom: 1px solid #eee;"></ul>
-                    <form id="guild-chat-form" action="" style="padding: 10px 0;">
-                        <input id="guild-chat-input" autocomplete="off" placeholder="Message in channel..."/><button>Send</button>
-                    </form>
-                </div>
+        <!-- Main Chat Content Area -->
+        <main id="chat-main">
+            <header id="chat-main-header">
+                <h3 id="chat-title">Welcome to Freekaos!</h3>
+                 <!-- DM Call button will be moved here or integrated cleanly -->
+                <button id="dm-call-user-btn" style="display:none;">Call User</button>
+            </header>
 
-                <!-- Direct Message Chat Area (New) -->
-                <div id="dm-chat-area" style="display: none; flex: 1; display: flex; flex-direction: column;">
-                    <div id="dm-chat-header-controls" style="display: flex; justify-content: space-between; align-items: center; padding: 0 15px; background-color: var(--light-bg); border-bottom: 1px solid var(--border-color);">
-                        <h3 id="dm-chat-header">Direct Message</h3>
-                        <button id="dm-call-user-btn" style="display:none;">Call User</button>
-                    </div>
-                    <ul id="dm-messages" style="list-style-type: none; margin: 0; padding: 0; overflow-y: auto; flex-grow: 1; border-bottom: 1px solid #eee;"></ul>
-                    <div id="dm-target-info" style="padding: 5px 15px; font-size: 0.8em; background-color: var(--light-bg); border-bottom: 1px solid var(--border-color); display:none;">
-                        Chatting with: <strong id="dm-chatting-with">Nobody</strong>
-                    </div>
-                    <form id="dm-chat-form" action="" style="padding: 10px 0;">
-                        <input id="dm-chat-input" autocomplete="off" placeholder="Send a direct message..."/><button>Send</button>
-                    </form>
+            <div id="messages-container">
+                <!-- Global Chat Area -->
+                <div id="global-chat-area" class="chat-area active-chat">
+                    <ul id="messages" class="message-list"></ul>
+                </div>
+                <!-- Guild Chat Area -->
+                <div id="guild-chat-area" class="chat-area">
+                    <ul id="guild-messages" class="message-list"></ul>
+                </div>
+                <!-- Direct Message Chat Area -->
+                <div id="dm-chat-area" class="chat-area">
+                    <ul id="dm-messages" class="message-list"></ul>
                 </div>
             </div>
 
-            <!-- User List Column (existing) -->
-            <div id="user-list-column" style="width: 200px; border-left: 1px solid #ccc; padding: 10px; overflow-y: auto;">
-                <h2>Users Online</h2>
-                <ul id="user-list"></ul>
-            </div>
+            <footer id="chat-input-area">
+                <form id="global-chat-form" class="message-form active-form">
+                    <input id="input" class="message-input" autocomplete="off" placeholder="Message #global" />
+                    <button type="submit">Send</button>
+                </form>
+                <form id="guild-chat-form" class="message-form">
+                    <input id="guild-chat-input" class="message-input" autocomplete="off" placeholder="Message in channel..." />
+                    <button type="submit">Send</button>
+                </form>
+                <form id="dm-chat-form" class="message-form">
+                    <input id="dm-chat-input" class="message-input" autocomplete="off" placeholder="Send a direct message..." />
+                    <button type="submit">Send</button>
+                </form>
+            </footer>
+        </main>
+
+        <!-- User List Panel (Far Right) -->
+        <aside id="user-list-panel">
+            <h2>Users Online</h2>
+            <ul id="user-list">
+                <!-- User list will be populated here -->
+            </ul>
+        </aside>
+
+    </div> <!-- .app-container -->
+
+    <!-- Modals / Hidden by default areas -->
+    <div id="username-modal" class="modal" style="display: block;"> <!-- Show by default until username set -->
+        <div class="modal-content">
+            <h3>Set Your Username</h3>
+            <input id="username-input" placeholder="Enter your username" />
+            <button id="set-username-btn">Set Username</button>
+            <p>Logged in: <strong id="modal-current-username-target">Anonymous</strong></p>
         </div>
+    </div>
+    
+    <div id="create-guild-modal" class="modal">
+        <div class="modal-content">
+            <h3>Create a New Guild</h3>
+            <input id="guild-name-input" placeholder="Guild name" />
+            <button id="create-guild-btn">Create Guild</button>
+            <button class="close-modal-btn" data-modal-id="create-guild-modal">Cancel</button>
+        </div>
+    </div>
 
-        <!-- Video Call Elements (existing, might need repositioning later) -->
-        <div id="video-call-area" style="padding:10px; border-top: 1px solid #ccc; margin-top:10px;">
-            <h2>Video Call</h2>
+    <div id="join-guild-modal" class="modal">
+        <div class="modal-content">
+            <h3>Join Guild with Invite Code</h3>
+            <input id="join-guild-code-input" placeholder="Enter invite code" />
+            <button id="join-guild-btn">Join Guild</button>
+            <button class="close-modal-btn" data-modal-id="join-guild-modal">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Video Call Area (to be styled as an overlay or integrated better) -->
+    <div id="video-call-container" class="modal"> <!-- Start as a modal/overlay -->
+        <div class="modal-content wide-modal">
+            <h3>Video Call</h3>
             <div id="call-controls">
                 <input id="call-target-username" placeholder="Username to call">
                 <button id="initiate-call-btn">Call</button>
                 <button id="answer-call-btn" style="display:none;">Answer</button>
                 <button id="reject-call-btn" style="display:none;">Reject</button>
                 <button id="hang-up-btn" style="display:none;">Hang Up</button>
+                 <button class="close-modal-btn" data-modal-id="video-call-container" title="Close Video Panel (does not hang up)">X</button>
             </div>
             <p id="call-status">Ready to call.</p>
-            <div id="video-streams" style="display: flex; justify-content: space-around; margin-top:10px;">
+            <div id="video-streams">
                 <div>
                     <p>My Video:</p>
-                    <video id="local-video" autoplay muted playsinline style="width:200px; height:150px; border:1px solid black;"></video>
+                    <video id="local-video" autoplay muted playsinline></video>
                 </div>
                 <div>
                     <p>Their Video:</p>
-                    <video id="remote-video" autoplay playsinline style="width:200px; height:150px; border:1px solid black;"></video>
+                    <video id="remote-video" autoplay playsinline></video>
                 </div>
             </div>
         </div>
     </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
