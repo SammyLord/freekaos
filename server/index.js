@@ -307,6 +307,72 @@ function addFederatedWebRTCHandlersToPeerSocket(peerSocketConnection, peerInstan
 
     // TODO: Add handlers for federated versions of 'call-rejected', 'hang-up', 'call-busy'
     // e.g., peerSocketConnection.on('federated-call-rejected', (fdata) => { ... });
+
+    peerSocketConnection.on('federated-call-rejected', (fdata) => {
+        // fdata: { originalRejectorFKey, targetFKey (original caller) }
+        console.log(`Received federated-call-rejected via peer ${peerInstanceId} for target ${fdata.targetFKey} from ${fdata.originalRejectorFKey}`);
+
+        if (!fdata.targetFKey || !fdata.targetFKey.endsWith(`@${OUR_INSTANCE_ID}`)) {
+            console.warn(`Federated call-rejected received by ${OUR_INSTANCE_ID} but target ${fdata.targetFKey} (original caller) is not for this instance. Ignoring.`);
+            return;
+        }
+        const localTargetUsername = fdata.targetFKey.split('@')[0];
+        const localTargetSocket = Object.values(io.sockets.sockets).find(s => s.username === localTargetUsername && federatedUserDirectory[fdata.targetFKey]?.localSocketId === s.id);
+
+        if (localTargetSocket) {
+            console.log(`Forwarding federated call-rejected to local user ${localTargetUsername} (${localTargetSocket.id}) from ${fdata.originalRejectorFKey}`);
+            localTargetSocket.emit('call-rejected', { 
+                byUser: fdata.originalRejectorFKey.split('@')[0], // Display username
+                byUserFederatedKey: fdata.originalRejectorFKey 
+            });
+        } else {
+            console.warn(`Federated call-rejected received for ${fdata.targetFKey}, but target (original caller) ${localTargetUsername} not found locally.`);
+        }
+    });
+
+    peerSocketConnection.on('federated-call-ended', (fdata) => {
+        // fdata: { originalHangerUpFKey, targetFKey (other party) }
+        console.log(`Received federated-call-ended via peer ${peerInstanceId} for target ${fdata.targetFKey} from ${fdata.originalHangerUpFKey}`);
+
+        if (!fdata.targetFKey || !fdata.targetFKey.endsWith(`@${OUR_INSTANCE_ID}`)) {
+            console.warn(`Federated call-ended received by ${OUR_INSTANCE_ID} but target ${fdata.targetFKey} is not for this instance. Ignoring.`);
+            return;
+        }
+        const localTargetUsername = fdata.targetFKey.split('@')[0];
+        const localTargetSocket = Object.values(io.sockets.sockets).find(s => s.username === localTargetUsername && federatedUserDirectory[fdata.targetFKey]?.localSocketId === s.id);
+
+        if (localTargetSocket) {
+            console.log(`Forwarding federated call-ended to local user ${localTargetUsername} (${localTargetSocket.id}) from ${fdata.originalHangerUpFKey}`);
+            localTargetSocket.emit('call-ended', { 
+                fromUsername: fdata.originalHangerUpFKey.split('@')[0], // Display username
+                fromFederatedKey: fdata.originalHangerUpFKey 
+            });
+        } else {
+            console.warn(`Federated call-ended received for ${fdata.targetFKey}, but target ${localTargetUsername} not found locally.`);
+        }
+    });
+
+    peerSocketConnection.on('federated-call-busy', (fdata) => {
+        // fdata: { originalBusyUserFKey, targetFKey (original caller) }
+        console.log(`Received federated-call-busy via peer ${peerInstanceId} for target ${fdata.targetFKey} from ${fdata.originalBusyUserFKey}`);
+
+        if (!fdata.targetFKey || !fdata.targetFKey.endsWith(`@${OUR_INSTANCE_ID}`)) {
+            console.warn(`Federated call-busy received by ${OUR_INSTANCE_ID} but target ${fdata.targetFKey} (original caller) is not for this instance. Ignoring.`);
+            return;
+        }
+        const localTargetUsername = fdata.targetFKey.split('@')[0];
+        const localTargetSocket = Object.values(io.sockets.sockets).find(s => s.username === localTargetUsername && federatedUserDirectory[fdata.targetFKey]?.localSocketId === s.id);
+
+        if (localTargetSocket) {
+            console.log(`Forwarding federated call-busy to local user ${localTargetUsername} (${localTargetSocket.id}) from ${fdata.originalBusyUserFKey}`);
+            localTargetSocket.emit('call-busy', { 
+                busyUser: fdata.originalBusyUserFKey.split('@')[0], // Display username
+                busyUserFederatedKey: fdata.originalBusyUserFKey 
+            });
+        } else {
+            console.warn(`Federated call-busy received for ${fdata.targetFKey}, but target (original caller) ${localTargetUsername} not found locally.`);
+        }
+    });
 }
 
 // New function to handle federated DM events from a peer
@@ -601,19 +667,28 @@ io.on('connection', (socket) => {
         }
 
         isPeer = true;
-        peerAddress = (data && data.address) ? data.address : remoteHost; // Prefer declared address if provided and verified
-        users[socket.id] = `PEER:${peerAddress}`;
-        socket.username = `PEER:${peerAddress}`;
-        console.log(`Socket ${socket.id} identified as INCOMING PEER: ${peerAddress}`);
-        // Store the recognized peerAddress (their instance ID) on the socket object for this incoming connection.
-        socket.instanceId = peerAddress; 
+        // UPDATED LOGIC FOR PEER IDENTIFICATION
+        let connectingPeerInstanceId = (data && data.instanceId) ? data.instanceId : null;
+        if (!connectingPeerInstanceId) {
+            // If data.address is in the format 'instance_at_PORT', it's better than remoteHost
+            const potentialAddrAsId = (data && data.address && data.address.startsWith('instance_at_')) ? data.address : remoteHost;
+            console.warn(`Incoming peer handshake from ${socket.id} (remote: ${remoteHost}) missing critical instanceId in handshake. Using '${potentialAddrAsId}' as fallback. This may impact routing if not the peer's canonical instanceId. Handshake data:`, data);
+            connectingPeerInstanceId = potentialAddrAsId; 
+        }
 
-        addFederatedWebRTCHandlersToPeerSocket(socket, peerAddress); // peerAddress is their instance ID
-        addFederatedUserListHandlersToPeerSocket(socket, peerAddress); // Placeholder
-        addFederatedChatMessageHandlersToPeerSocket(socket, peerAddress); // Placeholder
-        addFederatedGuildHandlersToPeerSocket(socket, peerAddress); // Add guild handlers for incoming peer
-        addFederatedDMHandlersToPeerSocket(socket, peerAddress); // Add DM handlers for incoming peer
-        addPeerDiscoveryHandlersToPeerSocket(socket, peerAddress); // Add Peer Discovery handlers for incoming peer
+        users[socket.id] = `PEER:${connectingPeerInstanceId}`;
+        socket.username = `PEER:${connectingPeerInstanceId}`; // socket.username is used as a general identifier for logging/display
+        socket.instanceId = connectingPeerInstanceId; // Crucial for routing logic for this specific socket connection!
+
+        console.log(`Socket ${socket.id} identified as INCOMING PEER: ${connectingPeerInstanceId} (based on handshake data)`);
+
+        // Pass connectingPeerInstanceId (the peer's actual instance ID) to handlers
+        addFederatedWebRTCHandlersToPeerSocket(socket, connectingPeerInstanceId);
+        addFederatedUserListHandlersToPeerSocket(socket, connectingPeerInstanceId); 
+        addFederatedChatMessageHandlersToPeerSocket(socket, connectingPeerInstanceId); 
+        addFederatedGuildHandlersToPeerSocket(socket, connectingPeerInstanceId); 
+        addFederatedDMHandlersToPeerSocket(socket, connectingPeerInstanceId); 
+        addPeerDiscoveryHandlersToPeerSocket(socket, connectingPeerInstanceId); 
 
         broadcastFederatedUserList(); // Update lists
         socket.emit('peer_handshake_ack', { instanceId: OUR_INSTANCE_ID });
@@ -625,10 +700,10 @@ io.on('connection', (socket) => {
 
         // Example: Acknowledge handshake
         socket.on('federated_chat_message', (messageData) => {
-            console.log(`Received federated message from INCOMING peer ${peerAddress} (socket ${socket.id}):`, messageData);
+            console.log(`Received federated message from INCOMING peer ${connectingPeerInstanceId} (socket ${socket.id}):`, messageData);
             const displayMessage = { 
                 ...messageData, 
-                user: `${messageData.user}@${messageData.instance || peerAddress}`
+                user: `${messageData.user}@${messageData.instance || connectingPeerInstanceId}`
             };
             io.emit('chat message', displayMessage); // Broadcast to local clients
             // Persist? messages.push(displayMessage); saveMessages(); 
@@ -637,7 +712,7 @@ io.on('connection', (socket) => {
         // Handler for user list updates from this specific INCOMING peer
         socket.on('peer_user_update', (update) => {
             // update = { users: { "username@theirInstanceId": { instanceId: "..." } } }
-            console.log(`Received peer_user_update from ${peerAddress}:`, Object.keys(update.users).length, 'users');
+            console.log(`Received peer_user_update from ${connectingPeerInstanceId}:`, Object.keys(update.users).length, 'users');
             let changed = false;
             for (const fKey in update.users) {
                 if (!federatedUserDirectory[fKey] || federatedUserDirectory[fKey].instanceId !== update.users[fKey].instanceId) {
@@ -656,7 +731,7 @@ io.on('connection', (socket) => {
 
         socket.on('peer_user_disconnect', (disconnectData) => {
             // disconnectData = { federatedKey: "username@theirInstanceId" }
-            console.log(`Received peer_user_disconnect for ${disconnectData.federatedKey} from ${peerAddress}`);
+            console.log(`Received peer_user_disconnect for ${disconnectData.federatedKey} from ${connectingPeerInstanceId}`);
             if (federatedUserDirectory[disconnectData.federatedKey]) {
                 delete federatedUserDirectory[disconnectData.federatedKey];
                 broadcastFederatedUserList();
@@ -664,7 +739,8 @@ io.on('connection', (socket) => {
         });
 
         if (!isBlacklisted) {
-            addFederatedWebRTCHandlersToPeerSocket(socket, peerAddress);
+            // This was already called with connectingPeerInstanceId if logic is correct above
+            // addFederatedWebRTCHandlersToPeerSocket(socket, connectingPeerInstanceId);
         }
 
         // New Guild/Channel Events
@@ -1231,29 +1307,139 @@ io.on('connection', (socket) => {
                 });
 
                 socket.on('call-rejected', (data) => {
-                    // data: { targetSocketId, byUser }
-                    console.log(`${data.byUser} rejected call to ${data.targetSocketId}`);
-                    const targetSocket = io.sockets.sockets[data.targetSocketId];
-                    if (targetSocket) {
-                        targetSocket.emit('call-rejected', { byUser: data.byUser });
+                    // Client sends: { targetSocketId, targetFederatedKey, byUser (this is the client's own username) }
+                    // `byUser` from client is not strictly needed here as we derive `rejectorFKey` from `socket`.
+                    if (!socket.username || socket.username === 'Anonymous') return;
+                    const rejectorFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+                    
+                    console.log(`Call rejected by ${rejectorFKey}. Target local: ${data.targetSocketId}, Target federated: ${data.targetFederatedKey}`);
+
+                    if (data.targetSocketId) { // Original caller was local
+                        const localTargetSocket = io.sockets.sockets[data.targetSocketId];
+                        if (localTargetSocket) {
+                            console.log(`Notifying local original caller ${localTargetSocket.id} (${localTargetSocket.username}) of rejection by ${rejectorFKey}`);
+                            localTargetSocket.emit('call-rejected', { 
+                                byUser: socket.username, // Username of the one who rejected
+                                byUserFederatedKey: rejectorFKey
+                            });
+                        } else {
+                            console.warn(`call-rejected: Local target socket ${data.targetSocketId} not found.`);
+                        }
+                    } else if (data.targetFederatedKey) { // Original caller was federated
+                        const originalCallerInstanceId = data.targetFederatedKey.split('@')[1];
+                        if (originalCallerInstanceId && originalCallerInstanceId !== OUR_INSTANCE_ID) {
+                            let relayedToPeer = false;
+                            for (const peerAddr in peerSockets) {
+                                const peerSocket = peerSockets[peerAddr];
+                                if (peerSocket && peerSocket.connected && peerSocket.instanceId === originalCallerInstanceId) {
+                                    console.log(`Relaying call-rejected from ${rejectorFKey} to original caller ${data.targetFederatedKey} via peer ${peerSocket.instanceId}`);
+                                    peerSocket.emit('federated-call-rejected', {
+                                        originalRejectorFKey: rejectorFKey,
+                                        targetFKey: data.targetFederatedKey // This is the original caller to be notified
+                                    });
+                                    relayedToPeer = true;
+                                    break;
+                                }
+                            }
+                            if (!relayedToPeer) {
+                                console.warn(`Could not relay call-rejected: Peer for instance ${originalCallerInstanceId} (original caller ${data.targetFederatedKey}) not found.`);
+                            }
+                        } else {
+                            console.warn(`call-rejected: Invalid targetFederatedKey or target is self instance: ${data.targetFederatedKey}`);
+                        }
+                    } else {
+                        console.warn(`call-rejected from ${rejectorFKey} had no targetSocketId or targetFederatedKey.`);
                     }
                 });
 
                 socket.on('hang-up', (data) => {
-                    // data: { targetSocketId }
-                    console.log(`${socket.username} hung up on ${data.targetSocketId}`);
-                    const targetSocket = io.sockets.sockets[data.targetSocketId];
-                    if (targetSocket) {
-                        targetSocket.emit('call-ended', { fromUsername: socket.username });
+                    // Client sends: { targetSocketId, targetFederatedKey }
+                    if (!socket.username || socket.username === 'Anonymous') return;
+                    const hangerUpFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+
+                    console.log(`Hang-up initiated by ${hangerUpFKey}. Other party local: ${data.targetSocketId}, Other party federated: ${data.targetFederatedKey}`);
+
+                    if (data.targetSocketId) { // Other party was local
+                        const localTargetSocket = io.sockets.sockets[data.targetSocketId];
+                        if (localTargetSocket) {
+                            console.log(`Notifying local party ${localTargetSocket.id} (${localTargetSocket.username}) of hang-up by ${hangerUpFKey}`);
+                            localTargetSocket.emit('call-ended', { 
+                                fromUsername: socket.username, // Username of the one who hung up
+                                fromFederatedKey: hangerUpFKey
+                            });
+                        } else {
+                            console.warn(`hang-up: Local target socket ${data.targetSocketId} not found.`);
+                        }
+                    } else if (data.targetFederatedKey) { // Other party was federated
+                        const otherPartyInstanceId = data.targetFederatedKey.split('@')[1];
+                        if (otherPartyInstanceId && otherPartyInstanceId !== OUR_INSTANCE_ID) {
+                            let relayedToPeer = false;
+                            for (const peerAddr in peerSockets) {
+                                const peerSocket = peerSockets[peerAddr];
+                                if (peerSocket && peerSocket.connected && peerSocket.instanceId === otherPartyInstanceId) {
+                                    console.log(`Relaying hang-up from ${hangerUpFKey} to other party ${data.targetFederatedKey} via peer ${peerSocket.instanceId}`);
+                                    peerSocket.emit('federated-call-ended', {
+                                        originalHangerUpFKey: hangerUpFKey,
+                                        targetFKey: data.targetFederatedKey // This is the other party to be notified
+                                    });
+                                    relayedToPeer = true;
+                                    break;
+                                }
+                            }
+                            if (!relayedToPeer) {
+                                console.warn(`Could not relay hang-up: Peer for instance ${otherPartyInstanceId} (other party ${data.targetFederatedKey}) not found.`);
+                            }
+                        } else {
+                            console.warn(`hang-up: Invalid targetFederatedKey or target is self instance: ${data.targetFederatedKey}`);
+                        }
+                    } else {
+                        console.warn(`hang-up from ${hangerUpFKey} had no targetSocketId or targetFederatedKey.`);
                     }
                 });
                 
                 socket.on('call-busy', (data) => {
-                    // data: { targetSocketId, busyUser }
-                    console.log(`${data.busyUser} is busy, notifying ${data.targetSocketId}`);
-                    const targetSocket = io.sockets.sockets[data.targetSocketId];
-                    if (targetSocket) {
-                        targetSocket.emit('call-busy', { busyUser: data.busyUser });
+                    // Client (callee) sends: { targetSocketId (caller's socketId), targetFederatedKey (caller's FKey), busyUser (self) }
+                    // `busyUser` from client is not strictly needed here.
+                    if (!socket.username || socket.username === 'Anonymous') return;
+                    const busyUserFKey = `${socket.username}@${OUR_INSTANCE_ID}`;
+
+                    console.log(`User ${busyUserFKey} is busy. Notifying caller. Caller local: ${data.targetSocketId}, Caller federated: ${data.targetFederatedKey}`);
+                    
+                    if (data.targetSocketId) { // Original caller was local
+                        const localTargetSocket = io.sockets.sockets[data.targetSocketId];
+                        if (localTargetSocket) {
+                            console.log(`Notifying local original caller ${localTargetSocket.id} (${localTargetSocket.username}) that ${busyUserFKey} is busy.`);
+                            localTargetSocket.emit('call-busy', { 
+                                busyUser: socket.username, // Username of the one who is busy
+                                busyUserFederatedKey: busyUserFKey
+                             });
+                        } else {
+                             console.warn(`call-busy: Local target socket (original caller) ${data.targetSocketId} not found.`);
+                        }
+                    } else if (data.targetFederatedKey) { // Original caller was federated
+                        const originalCallerInstanceId = data.targetFederatedKey.split('@')[1];
+                        if (originalCallerInstanceId && originalCallerInstanceId !== OUR_INSTANCE_ID) {
+                            let relayedToPeer = false;
+                            for (const peerAddr in peerSockets) {
+                                const peerSocket = peerSockets[peerAddr];
+                                if (peerSocket && peerSocket.connected && peerSocket.instanceId === originalCallerInstanceId) {
+                                    console.log(`Relaying call-busy from ${busyUserFKey} to original caller ${data.targetFederatedKey} via peer ${peerSocket.instanceId}`);
+                                    peerSocket.emit('federated-call-busy', {
+                                        originalBusyUserFKey: busyUserFKey,
+                                        targetFKey: data.targetFederatedKey // This is the original caller to be notified
+                                    });
+                                    relayedToPeer = true;
+                                    break;
+                                }
+                            }
+                            if (!relayedToPeer) {
+                                console.warn(`Could not relay call-busy: Peer for instance ${originalCallerInstanceId} (original caller ${data.targetFederatedKey}) not found.`);
+                            }
+                        } else {
+                            console.warn(`call-busy: Invalid targetFederatedKey or target is self instance for original caller: ${data.targetFederatedKey}`);
+                        }
+                    } else {
+                        console.warn(`call-busy from ${busyUserFKey} had no targetSocketId or targetFederatedKey for the original caller.`);
                     }
                 });
             });

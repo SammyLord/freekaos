@@ -405,26 +405,39 @@ hangUpBtn.addEventListener('click', () => {
 
 
 socket.on('webrtc-offer', async (data) => {
-    console.log(`Incoming webrtc-offer from: ${data.fromUsername} (${data.fromFederatedKey || data.fromSocketId})`);
-    
-    if (peerConnection && peerConnection.signalingState !== "stable") {
-        console.warn("Received an offer while not in a stable state. Current state:", peerConnection.signalingState);
+    const { offer, fromUsername, fromSocketId, fromFederatedKey } = data;
+    console.log(`Received WebRTC offer from ${fromUsername} (Socket: ${fromSocketId}, FKey: ${fromFederatedKey})`, offer);
+
+    if (peerConnection) { // If already in a call or call attempt is active
+        console.log("Received a new call offer while already in an active call or call attempt. Emitting 'call-busy'.");
+        socket.emit('call-busy', {
+            // Target for the 'call-busy' event is the original caller of this new offer
+            targetSocketId: fromSocketId, 
+            targetFederatedKey: fromFederatedKey,
+            // busyUser: currentUsername // Server will use socket.username for this
+        });
+        return; // Don't process this new offer further
+    }
+
+    if (!await startLocalMedia()) {
+        console.warn("Failed to start local media, rejecting call offer implicitly by not answering.");
+        return;
     }
 
     incomingCallData = { 
-        offer: data.offer, 
-        fromUsername: data.fromUsername,
-        fromSocketId: data.fromSocketId,    
-        fromFederatedKey: data.fromFederatedKey 
+        offer: offer, 
+        fromUsername: fromUsername,
+        fromSocketId: fromSocketId,    
+        fromFederatedKey: fromFederatedKey 
     };
 
-    callStatus.textContent = `Incoming call from ${data.fromUsername}. Ready to answer?`;
+    callStatus.textContent = `Incoming call from ${fromUsername}. Ready to answer?`;
     answerCallBtn.style.display = 'inline-block';
     answerCallBtn.disabled = false; 
     rejectCallBtn.style.display = 'inline-block';
     initiateCallBtn.style.display = 'none'; 
     callTargetUsernameInput.disabled = true; 
-    callTargetUsernameInput.value = data.fromUsername; 
+    callTargetUsernameInput.value = fromUsername; 
     hangUpBtn.style.display = 'none'; 
 });
 
