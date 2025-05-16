@@ -11,6 +11,26 @@ Freekaos aims to be a decentralized communication platform, similar in spirit to
     *   Client-side user identification (`currentFKey`) uses a server-provided instance ID for better consistency in federated contexts.
 *   **User Interface (UI):**
     *   Refreshed UI with improved styling for consistency, layout, and visual hierarchy using CSS variables.
+    *   **Major Overhaul (Discord/Slack-like Layout):**
+        *   **Multi-Column Structure:** The client now features a multi-column layout:
+            *   Far-left: Guilds navigation bar.
+            *   Secondary panel: Displays channels (for selected guild) or DM-related information (when "Home" is selected). Also houses user settings access.
+            *   Main content area: Displays the active chat (global, guild channel, or DM).
+            *   Far-right: User list panel.
+        *   **Modal-Driven Interactions:** Key actions are handled through modals:
+            *   Username input on first launch.
+            *   Creating and joining guilds.
+            *   Initiating and managing WebRTC video/audio calls.
+        *   **Client-Side Refactoring:** `client/script.js` has been significantly refactored to support the new UI:
+            *   Updated DOM element references and modal management logic.
+            *   Streamlined initial UI state management (`setInitialUIState`).
+            *   Guild display (`renderGuilds`) and selection (`selectGuild`) in the new guilds navigation bar.
+            *   Channel display (`renderChannels`) and selection (`selectChannel`) logic for the secondary panel.
+            *   Global, guild, and DM chat rendering and form submissions are now managed within their respective views in the main content area.
+            *   User list rendering (`renderUserList`) populates the right-hand user panel, with clicks initiating DMs.
+            *   DM functionality (message rendering, history loading, unread indicators) is fully integrated with the new layout.
+            *   WebRTC video call logic (media handling, peer connection setup, signaling via sockets) is integrated with the new video call modal.
+            *   The secondary panel now dynamically shows channel lists or DM-related information based on guild selection.
 *   **Real-time Chat (Global):**
     *   Text-based global chat room.
     *   Usernames for identification.
@@ -139,11 +159,16 @@ Once the server is running (e.g., on `http://localhost:3001`):
 
 ## Current Status & Next Steps
 
-Core functionality for global chat, user lists, administration, federated WebRTC calls, basic guild features (creation, channels, chat, intra-instance invites), Direct Messages (DMs) with call integration and unread indicators, and a dynamic peer discovery mechanism is implemented. The UI has undergone an initial refresh for better consistency and appearance.
+Core functionality for global chat, user lists, administration, federated WebRTC calls, basic guild features (creation, channels, chat, intra-instance invites), Direct Messages (DMs) with call integration and unread indicators, and a dynamic peer discovery mechanism is implemented. The UI has undergone an initial refresh and a subsequent major overhaul to a multi-column, modal-driven design, with significant refactoring of the client-side JavaScript to support this new structure.
 
 The immediate next steps involve:
-*   Thorough testing of all features, especially federated DMs, calls from DMs, guild interactions, and dynamic peer discovery across instances.
-*   Refining UI/UX elements, particularly for guild owner controls.
+*   Thorough testing of all features within the new UI, especially:
+    *   Interactions within the secondary panel (channel selection, DM info display when "Home" guild is selected).
+    *   All modal workflows (username, guilds, video calls).
+    *   Federated DMs, calls from DMs, and guild interactions across instances.
+    *   Dynamic peer discovery.
+*   Refining UI/UX elements, particularly for guild owner controls within the new layout, and ensuring the user info panel is functional.
+*   Implementing content switching for the secondary panel (e.g., showing a list of recent DMs or DM instructions when "Home" is selected, and a user profile/settings area).
 
 Further development could include:
 *   User accounts with persistent identities (beyond session-based usernames).
