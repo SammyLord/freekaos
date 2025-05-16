@@ -64,6 +64,7 @@ let selectedGuildId = null;
 let selectedChannelId = null;
 let currentDmTargetFKey = null; // New: Federated key of the current DM partner
 let dmHistories = {};         // New: Cache for DM conversations, e.g., { "conversationId": [messages] }
+let unreadDms = {};           // New: { conversationId: true } for unread DM conversations
 
 // WebRTC Global Variables
 let localStream = null;
@@ -678,6 +679,13 @@ function switchToDmChatView(targetUserFKey) {
              dmCallUserBtn.style.display = (targetUserFKey === currentFKey) ? 'none' : 'inline-block'; // Don't show call for self
         }
         
+        // Clear unread status for this conversation
+        const conversationId = getDmConversationId(currentFKey, targetUserFKey);
+        if (conversationId && unreadDms[conversationId]) {
+            delete unreadDms[conversationId];
+            updateDmUnreadIndicators();
+        }
+
         console.log(`Loading DM history with ${targetUserFKey}`);
         socket.emit('load_dm_history', { withUserFKey: targetUserFKey });
     } else {
@@ -722,13 +730,22 @@ socket.on('receive_dm', (messageObject) => {
         dmHistories[conversationId].push(messageObject);
     }
     
-    // If this DM is for the currently active DM chat, render it
-    if (currentDmTargetFKey && (conversationId === getDmConversationId(currentFKey, currentDmTargetFKey))) {
+    const activeConversationId = currentDmTargetFKey ? getDmConversationId(currentFKey, currentDmTargetFKey) : null;
+
+    if (currentDmTargetFKey && (conversationId === activeConversationId)) {
         renderDmMessage(messageObject);
+        // If the current chat is open, it's read by definition, ensure no unread flag
+        if (unreadDms[conversationId]) {
+            delete unreadDms[conversationId];
+            updateDmUnreadIndicators(); // Update UI if it was marked unread somehow
+        }
     } else {
-        // TODO: Add a visual notification for new DMs not currently in view
+        // DM is for a conversation not currently active, or no DM conversation is active
         console.log(`Notification: New DM from ${messageObject.senderFKey.split('@')[0]} in conversation ${conversationId}`);
-        // Highlight user in user list or show a badge on DM tab (future enhancement)
+        if (messageObject.senderFKey !== currentFKey) { // Don't mark own messages as unread if window not focused
+            unreadDms[conversationId] = true;
+            updateDmUnreadIndicators();
+        }
     }
 });
 
@@ -771,6 +788,31 @@ function renderDmMessage(msg) {
 
 dmMessages.appendChild(item);
     dmMessages.scrollTop = dmMessages.scrollHeight;
+}
+
+function updateDmUnreadIndicators() {
+    if (!showDmChatBtn || !userList) return;
+
+    // Global DM indicator on the "Direct Messages" button
+    if (Object.keys(unreadDms).length > 0) {
+        showDmChatBtn.classList.add('has-unread');
+    } else {
+        showDmChatBtn.classList.remove('has-unread');
+    }
+
+    // Per-user indicator in the user list
+    const userListItems = userList.querySelectorAll('li');
+    userListItems.forEach(item => {
+        const userFKey = item.dataset.userFKey;
+        if (userFKey && userFKey !== currentFKey) {
+            const conversationId = getDmConversationId(currentFKey, userFKey);
+            if (unreadDms[conversationId]) {
+                item.classList.add('has-unread-dm');
+            } else {
+                item.classList.remove('has-unread-dm');
+            }
+        }
+    });
 }
 
 // Placeholder for styling current user in user list and DM messages

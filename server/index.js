@@ -12,15 +12,14 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3001;
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 const WORD_BLACKLIST_FILE = path.join(__dirname, 'config/word_blacklist.txt');
-const INSTANCE_BLACKLIST_FILE = path.join(__dirname, 'config/instance_blacklist.txt');
-const PEER_LIST_FILE = path.join(__dirname, 'config/peer_list.txt');
+const PEER_BLACKLIST_FILE = path.join(__dirname, 'config/peer_blacklist.txt'); // RENAMED from PEER_LIST_FILE
+const BOOTSTRAP_NODES_FILE = path.join(__dirname, 'config/bootstrap_nodes.txt'); // NEW
 const GUILDS_FILE = path.join(__dirname, 'guilds.json'); // Existing guilds file
 const DMS_FILE = path.join(__dirname, 'direct_messages.json'); // New DMs file
 let messages = [];
 let users = {}; // Store socket.id -> username mapping
 let wordBlacklist = [];
-let instanceBlacklist = [];
-let peerList = [];
+let peerBlacklist = []; // RENAMED from peerList
 let peerSockets = {}; // To store active outgoing connections to peers { 'address': socket }
 let federatedUserDirectory = {}; // { "username@instanceId": { instanceId: "...", lastSeen: timestamp, localSocketId: "... (if local) } }
 const OUR_INSTANCE_ID = `instance_at_${PORT}`; // Defined earlier for peer handshake
@@ -60,73 +59,35 @@ if (fs.existsSync(WORD_BLACKLIST_FILE)) {
 
 loadWordBlacklist();
 
-// Load instance blacklist
-function loadInstanceBlacklist() {
+// Load PEER BLACKLIST (formerly peer list)
+function loadPeerBlacklist() {
     try {
-        if (fs.existsSync(INSTANCE_BLACKLIST_FILE)) {
-            const data = fs.readFileSync(INSTANCE_BLACKLIST_FILE, 'utf8');
-            instanceBlacklist = data.split('\n').map(host => host.trim().toLowerCase()).filter(host => host.length > 0 && !host.startsWith('#'));
-            console.log('Instance blacklist loaded:', instanceBlacklist.length, 'hosts:', instanceBlacklist);
+        if (fs.existsSync(PEER_BLACKLIST_FILE)) {
+            const data = fs.readFileSync(PEER_BLACKLIST_FILE, 'utf8');
+            peerBlacklist = data.split('\n').map(host => host.trim().toLowerCase()).filter(host => host.length > 0 && !host.startsWith('#'));
+            console.log('Peer blacklist loaded:', peerBlacklist.length, 'hosts:', peerBlacklist);
         } else {
-            console.log('Instance blacklist file not found. No instances blacklisted.');
-            instanceBlacklist = [];
+            console.log('Peer blacklist file not found. No peers blacklisted initially.');
+            peerBlacklist = [];
         }
     } catch (err) {
-        console.error('Error loading instance blacklist:', err);
-        instanceBlacklist = [];
+        console.error('Error loading peer blacklist:', err);
+        peerBlacklist = [];
     }
-}
-if (fs.existsSync(INSTANCE_BLACKLIST_FILE)) {
-    fs.watchFile(INSTANCE_BLACKLIST_FILE, () => { console.log('Instance blacklist changed. Reloading...'); loadInstanceBlacklist(); });
-} else {
-    console.warn('Instance blacklist file does not exist. Will not be watched.');
-}
-loadInstanceBlacklist();
-
-// Load peer list
-function loadPeerListAndConnect() {
-    try {
-        if (fs.existsSync(PEER_LIST_FILE)) {
-            const data = fs.readFileSync(PEER_LIST_FILE, 'utf8');
-            const newPeerList = data.split('\n').map(peer => peer.trim()).filter(peer => peer.length > 0 && !peer.startsWith('#'));
-            console.log('Peer list loaded:', newPeerList.length, 'peers ->', newPeerList);
-            
-            // Check for removed peers to disconnect
-            for (const oldPeerAddress in peerSockets) {
-                if (!newPeerList.includes(oldPeerAddress)) {
-                    console.log(`Peer ${oldPeerAddress} removed from list. Disconnecting.`);
-                    if (peerSockets[oldPeerAddress]) {
-                        peerSockets[oldPeerAddress].disconnect();
-                        delete peerSockets[oldPeerAddress];
-                    }
-                }
-            }
-            peerList = newPeerList;
-        } else {
-            console.log('Peer list file not found. No initial peers configured.');
-            peerList = [];
-            // Disconnect any existing peer connections if file is removed/emptied
-            for (const peerAddress in peerSockets) {
-                peerSockets[peerAddress].disconnect();
-                delete peerSockets[peerAddress];
-            }
-        }
-    } catch (err) {
-        console.error('Error loading peer list:', err);
-        peerList = [];
-    }
-    connectToPeers(); // Attempt to connect after loading/reloading
+    // DO NOT call connectToPeers() here anymore. Blacklist loading doesn't trigger connections.
 }
 
-if (fs.existsSync(PEER_LIST_FILE)) {
-    fs.watchFile(PEER_LIST_FILE, () => { 
-        console.log('Peer list changed. Reloading and reconnecting peers...'); 
-        loadPeerListAndConnect(); 
+if (fs.existsSync(PEER_BLACKLIST_FILE)) {
+    fs.watchFile(PEER_BLACKLIST_FILE, () => { 
+        console.log('Peer blacklist file changed. Reloading...'); 
+        loadPeerBlacklist(); 
+        // Optionally, re-evaluate existing peer connections against the new blacklist and disconnect if needed.
+        // For simplicity, current connections are not automatically dropped on blacklist update, but new ones won't be made.
     });
 } else {
-    console.warn('Peer list file does not exist. Will not be watched.');
+    console.warn(`Peer blacklist file (${PEER_BLACKLIST_FILE}) does not exist. Will not be watched until created.`);
 }
-loadPeerListAndConnect(); // Initial load and connect
+loadPeerBlacklist(); // Initial load
 
 // Function to censor a message based on the word blacklist
 function censorMessage(message) {
@@ -437,55 +398,101 @@ function addFederatedGuildHandlersToPeerSocket(peerSocketConnection, peerInstanc
     // TODO: Add handlers for other federated guild events (e.g., member join/leave, channel create/delete) if full guild sync is implemented
 }
 
-// Function to attempt connections to all configured peers
-function connectToPeers() {
-    console.log('Attempting to connect to configured peers...');
-    peerList.forEach(peerAddress => {
-        if (instanceBlacklist.includes(peerAddress.toLowerCase())) {
-            console.log(`Peer ${peerAddress} is in instance blacklist. Skipping connection.`);
-            return;
+// Modified connectToPeers function: now accepts an array of potential peers
+function connectToPeers(potentialPeers = []) {
+    if (!potentialPeers || potentialPeers.length === 0) {
+        console.log('connectToPeers called with no potential peers to try.');
+        return;
+    }
+    console.log(`Attempting to connect to ${potentialPeers.length} potential peers...`);
+
+    potentialPeers.forEach(peerAddress => {
+        const trimmedAddress = peerAddress.trim();
+        if (trimmedAddress === '' || trimmedAddress.startsWith('#')) {
+            return; // Skip empty or commented lines
         }
-        if (peerSockets[peerAddress] && peerSockets[peerAddress].connected) {
-            // console.log(`Already connected to peer ${peerAddress}.`);
+
+        // Normalize address for checking against blacklist and existing connections
+        // (e.g. remove http://, ensure consistent port format if applicable)
+        const connectableAddress = trimmedAddress.includes(':/') ? trimmedAddress : `http://${trimmedAddress}`;
+        const normalizedForCheck = trimmedAddress.replace(/^https?:\/\//, '').toLowerCase();
+
+        if (peerBlacklist.some(blacklistedHost => normalizedForCheck.includes(blacklistedHost.replace(/^https?:\/\//, '')))) {
+            console.log(`Peer ${trimmedAddress} is in peer blacklist. Skipping connection.`);
             return;
         }
 
-        const fullPeerAddress = peerAddress.startsWith('http') ? peerAddress : `http://${peerAddress}`;
-        console.log(`Attempting to connect to peer: ${fullPeerAddress}`);
+        // Check if it's self (more robust check for various forms of OUR_INSTANCE_ID or localhost:PORT)
+        const selfAddresses = [
+            OUR_INSTANCE_ID.toLowerCase(), 
+            `localhost:${PORT}`, 
+            `127.0.0.1:${PORT}`,
+            `[::1]:${PORT}`,
+            `::1:${PORT}`
+        ];
+        if (selfAddresses.some(selfAddr => normalizedForCheck.includes(selfAddr))) {
+            // console.log(`Skipping connection to self: ${trimmedAddress}`);
+            return;
+        }
         
-        const peerSocket = ioClient(fullPeerAddress, {
+        // Check if already connected or connection attempt in progress (using normalized form as key for peerSockets)
+        // peerSockets keys should ideally be the normalized form used for checks.
+        // For now, we check against peerSocket.instanceId if available or the address used for connection.
+        let isAlreadyConnected = false;
+        for (const existingPeerKey in peerSockets) {
+            const sock = peerSockets[existingPeerKey];
+            if (sock && sock.connected && 
+                ( (sock.instanceId && sock.instanceId.toLowerCase().includes(normalizedForCheck)) || 
+                  existingPeerKey.toLowerCase().includes(normalizedForCheck) ) ) {
+                isAlreadyConnected = true;
+                break;
+            }
+        }
+        if (isAlreadyConnected) {
+            // console.log(`Already connected or attempting connection to peer ${trimmedAddress}. Skipping.`);
+            return;
+        }
+
+        console.log(`Attempting to connect to potential peer: ${connectableAddress}`);
+        
+        const peerSocket = ioClient(connectableAddress, {
             reconnectionAttempts: 3, 
             timeout: 5000,
-            auth: { instanceId: OUR_INSTANCE_ID } // Send our instanceId during connection for handshake
+            auth: { instanceId: OUR_INSTANCE_ID } 
         });
 
+        // Standard peerSocket event handlers (connect, peer_handshake_ack, connect_error, disconnect)
+        // These will also need to call the addFederatedXXXHandlers and addPeerDiscoveryHandlersToPeerSocket
         peerSocket.on('connect', () => {
-            console.log(`Successfully connected to (outgoing) peer instance: ${fullPeerAddress}`);
-            // peerSockets[peerAddress] = peerSocket; // Store by the original address from peer_list.txt
-                                                // Storing by actual connected URI or instanceId might be better.
-
-            // Send a handshake message to identify this instance as a peer (already done by auth, but can do explicit too)
+            console.log(`Successfully connected to (outgoing) peer instance: ${connectableAddress}`);
             peerSocket.emit('peer_handshake', { 
-                instanceId: OUR_INSTANCE_ID, 
-                address: `localhost:${PORT}`, // Our advertised address (simplification)
+                instanceId: OUR_INSTANCE_ID,
+                address: `localhost:${PORT}`, 
                 version: '1.0.0' 
             });
         });
 
         peerSocket.on('peer_handshake_ack', (ackData) => {
-            // ackData should contain { instanceId: theirInstanceId }
-            console.log(`Outgoing peer handshake to ${fullPeerAddress} acknowledged by their instance: ${ackData.instanceId}`);
-            peerSocket.instanceId = ackData.instanceId; // Store their instance ID on our socket object for them
-            peerSockets[peerAddress] = peerSocket; // Now formally add to active peers by configured address
+            if (!ackData || !ackData.instanceId) {
+                console.warn(`Received invalid peer_handshake_ack from ${connectableAddress}. Disconnecting.`);
+                peerSocket.disconnect();
+                return;
+            }
+            console.log(`Outgoing peer handshake to ${connectableAddress} acknowledged by their instance: ${ackData.instanceId}`);
+            peerSocket.instanceId = ackData.instanceId; 
+            
+            // Use a consistent key for peerSockets, e.g., the acknowledged instanceId or the connectableAddress
+            const peerKey = ackData.instanceId; // Or connectableAddress, ensure consistency
+            peerSockets[peerKey] = peerSocket; 
 
-            // Add handlers for federated messages from this specific OUTGOING peer
             addFederatedWebRTCHandlersToPeerSocket(peerSocket, ackData.instanceId);
-            addFederatedUserListHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
-            addFederatedChatMessageHandlersToPeerSocket(peerSocket, ackData.instanceId); // Assuming this function exists or will be added
-            addFederatedGuildHandlersToPeerSocket(peerSocket, ackData.instanceId); // Add guild handlers for outgoing peer
-            addFederatedDMHandlersToPeerSocket(peerSocket, ackData.instanceId); // Add DM handlers for outgoing peer
+            addFederatedGuildHandlersToPeerSocket(peerSocket, ackData.instanceId);
+            addFederatedDMHandlersToPeerSocket(peerSocket, ackData.instanceId);
+            addPeerDiscoveryHandlersToPeerSocket(peerSocket, ackData.instanceId); 
+            addFederatedUserListHandlersToPeerSocket(peerSocket, ackData.instanceId);
+            addFederatedChatMessageHandlersToPeerSocket(peerSocket, ackData.instanceId);
 
-            // Send our user list to the newly connected peer
+            // Send our user list
             const localUsersForPeers = {};
             for (const key in federatedUserDirectory) {
                 if (federatedUserDirectory[key].instanceId === OUR_INSTANCE_ID && !key.startsWith('PEER:')) {
@@ -495,23 +502,34 @@ function connectToPeers() {
             if (Object.keys(localUsersForPeers).length > 0) {
                 peerSocket.emit('peer_user_update', { users: localUsersForPeers });
             }
+
+            // Send our list of *active connected peers* (not our blacklist)
+            const activePeerInstanceIds = Object.values(peerSockets)
+                .map(s => s.instanceId)
+                .filter(id => id && id !== ackData.instanceId && id !== OUR_INSTANCE_ID);
+            
+            if (activePeerInstanceIds.length > 0) {
+                console.log(`Sharing our active peer list (${activePeerInstanceIds.length} peers) with new peer ${ackData.instanceId}`);
+                peerSocket.emit('peer_list_share', activePeerInstanceIds);
+            }
         });
 
         peerSocket.on('connect_error', (err) => {
-            console.warn(`Failed to connect to (outgoing) peer ${fullPeerAddress}: ${err.message}`);
-            if (peerSockets[peerAddress]) delete peerSockets[peerAddress];
+            console.warn(`Failed to connect to (outgoing) peer ${connectableAddress}: ${err.message}`);
+            const peerKey = peerSocket.instanceId || connectableAddress; // Use same logic for key
+            if (peerSockets[peerKey]) delete peerSockets[peerKey];
         });
 
         peerSocket.on('disconnect', (reason) => {
-            console.log(`Disconnected from (outgoing) peer ${fullPeerAddress} (Instance: ${peerSocket.instanceId || 'N/A'}): ${reason}`);
-            if (peerSockets[peerAddress]) delete peerSockets[peerAddress];
-            // When an outgoing peer connection disconnects, we might want to remove users associated with its instanceId
+            console.log(`Disconnected from (outgoing) peer ${connectableAddress} (Instance: ${peerSocket.instanceId || 'N/A'}): ${reason}`);
+            const peerKey = peerSocket.instanceId || connectableAddress;
+            if (peerSockets[peerKey]) delete peerSockets[peerKey];
+            
             let changed = false;
             if (peerSocket.instanceId) {
                 console.log(`Cleaning up users from disconnected outgoing peer instance: ${peerSocket.instanceId}`);
                 for (const fKey in federatedUserDirectory) {
                     if (federatedUserDirectory[fKey].instanceId === peerSocket.instanceId) {
-                        console.log(`Removing user ${fKey} due to outgoing peer disconnect.`);
                         delete federatedUserDirectory[fKey];
                         changed = true;
                     }
@@ -521,6 +539,29 @@ function connectToPeers() {
         });
     });
 }
+
+// Load bootstrap nodes and attempt initial connections
+function tryBootstrapConnections() {
+    if (fs.existsSync(BOOTSTRAP_NODES_FILE)) {
+        try {
+            const data = fs.readFileSync(BOOTSTRAP_NODES_FILE, 'utf8');
+            const bootstrapPeers = data.split('\n').map(p => p.trim()).filter(p => p.length > 0 && !p.startsWith('#'));
+            if (bootstrapPeers.length > 0) {
+                console.log(`Found ${bootstrapPeers.length} bootstrap nodes. Attempting connections...`);
+                connectToPeers(bootstrapPeers);
+            } else {
+                console.log('Bootstrap nodes file is empty. Waiting for incoming connections or manual intervention.');
+            }
+        } catch (err) {
+            console.error('Error reading bootstrap_nodes.txt:', err);
+        }
+    } else {
+        console.log('bootstrap_nodes.txt not found. Instance will start passively. Create the file with initial peer addresses to bootstrap the network.');
+    }
+}
+
+// Call bootstrap connection attempt on startup
+tryBootstrapConnections();
 
 io.on('connection', (socket) => {
     console.log(`A user connected: ${socket.id}`);
@@ -542,11 +583,11 @@ io.on('connection', (socket) => {
         console.log(`Received peer_handshake from ${socket.id} (address: ${incomingPeerCandidateAddress}), data:`, data);
 
         // Normalize the address for blacklist checking (e.g., remove port if blacklist is just hostnames)
-        // For simplicity, let's assume instanceBlacklist contains host:port or just host.
+        // For simplicity, let's assume peerBlacklist contains host:port or just host.
         const remoteHost = (socket.handshake.address.includes('::ffff:') ? socket.handshake.address.split('::ffff:')[1] : socket.handshake.address).toLowerCase();
 
         let isBlacklisted = false;
-        for (const blacklistedEntry of instanceBlacklist) {
+        for (const blacklistedEntry of peerBlacklist) {
             if (remoteHost.includes(blacklistedEntry) || (data && data.address && data.address.toLowerCase().includes(blacklistedEntry))) {
                 isBlacklisted = true;
                 break;
@@ -572,6 +613,7 @@ io.on('connection', (socket) => {
         addFederatedChatMessageHandlersToPeerSocket(socket, peerAddress); // Placeholder
         addFederatedGuildHandlersToPeerSocket(socket, peerAddress); // Add guild handlers for incoming peer
         addFederatedDMHandlersToPeerSocket(socket, peerAddress); // Add DM handlers for incoming peer
+        addPeerDiscoveryHandlersToPeerSocket(socket, peerAddress); // Add Peer Discovery handlers for incoming peer
 
         broadcastFederatedUserList(); // Update lists
         socket.emit('peer_handshake_ack', { instanceId: OUR_INSTANCE_ID });
@@ -1302,3 +1344,55 @@ process.on('SIGINT', () => {
     saveDirectMessages();
     process.exit(0);
 });
+
+// New function for peer discovery related handlers
+function addPeerDiscoveryHandlersToPeerSocket(peerSocketConnection, peerInstanceId) {
+    console.log(`Adding Peer Discovery handlers for peer: ${peerInstanceId} (socket: ${peerSocketConnection.id})`);
+
+    // Handler for receiving a list of peers from another peer
+    peerSocketConnection.on('peer_list_share', (receivedPeerList) => {
+        if (!Array.isArray(receivedPeerList)) {
+            console.warn(`Received invalid peer_list_share from ${peerInstanceId}, not an array.`);
+            return;
+        }
+        console.log(`Received peer_list_share from ${peerInstanceId} with ${receivedPeerList.length} addresses.`);
+        let newPeersAdded = false;
+        let peersToAppendToFile = [];
+
+        receivedPeerList.forEach(peerAddress => {
+            const trimmedAddress = peerAddress.trim();
+            if (trimmedAddress === '' || trimmedAddress.startsWith('#') || trimmedAddress.includes(OUR_INSTANCE_ID) || trimmedAddress === `localhost:${PORT}` || trimmedAddress === `127.0.0.1:${PORT}`) {
+                return; // Skip empty, comments, self, or common localhost variations of self
+            }
+            // Normalize address for comparison (e.g. remove http:// if present for blacklist/peerList check)
+            const normalizedAddress = trimmedAddress.replace(/^https?:\/\//, '');
+
+            if (!peerBlacklist.some(blacklisted => normalizedAddress.includes(blacklisted)) && 
+                !peerBlacklist.some(existingPeer => existingPeer.replace(/^https?:\/\//, '') === normalizedAddress)) {
+                
+                console.log(`Discovered new potential peer from ${peerInstanceId}: ${trimmedAddress}`);
+                peerBlacklist.push(trimmedAddress); // Add to in-memory list
+                peersToAppendToFile.push(trimmedAddress); // Mark for appending to file
+                newPeersAdded = true;
+            }
+        });
+
+        if (peersToAppendToFile.length > 0) {
+            try {
+                const fileContentToAppend = peersToAppendToFile.join('\n') + '\n';
+                fs.appendFileSync(PEER_BLACKLIST_FILE, fileContentToAppend, 'utf8');
+                console.log(`Appended ${peersToAppendToFile.length} new peers to ${PEER_BLACKLIST_FILE}.`);
+            } catch (err) {
+                console.error(`Error appending new peers to ${PEER_BLACKLIST_FILE}:`, err);
+            }
+        }
+
+        if (newPeersAdded) {
+            // No need to call connectToPeers() if we just appended and updated in-memory peerList.
+            // Instead, directly call connectToPeers() to attempt connections to all, including newly added ones.
+            // connectToPeers() will re-read the file, which is fine, but connectToPeers() is more direct here.
+            console.log('New peers discovered, attempting to connect...');
+            connectToPeers(); // This will try to connect to new peers added to the in-memory list
+        }
+    });
+}

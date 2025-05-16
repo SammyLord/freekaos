@@ -382,4 +382,32 @@ body:not(.username-set) #username-area {
     background-color: #f1f0f0; /* A light grey for received */
     margin-right: auto; /* Align to left */
     border-radius: 10px 10px 10px 0; /* Bubble tail on bottom-right for received */
+}
+
+/* Unread DM Indicators */
+#chat-view-selector button.has-unread {
+    font-weight: bold;
+    position: relative; /* For positioning the dot */
+}
+
+#chat-view-selector button.has-unread::after {
+    content: '●'; /* Unicode dot character */
+    font-size: 12px; /* Adjust size of the dot */
+    color: var(--error-color); /* Use a distinct color, like error or a bright notification color */
+    position: absolute;
+    top: 2px; /* Adjust position as needed */
+    right: 5px; /* Adjust position as needed */
+}
+
+#user-list li.has-unread-dm {
+    font-weight: bold; /* Make username bold */
+    position: relative; /* For positioning the dot */
+}
+
+#user-list li.has-unread-dm::before {
+    content: '●';
+    font-size: 10px;
+    color: var(--primary-color);
+    margin-right: 6px;
+    /* Optional: absolute positioning if more control needed relative to the li */
 } 

@@ -20,6 +20,7 @@ Freekaos aims to be a decentralized communication platform, similar in spirit to
     *   **DM Interface:** A dedicated DM view in the client allows users to switch between global chat, guild chat, and DMs.
     *   **Message Persistence:** DM history is saved on the server (`direct_messages.json`) and loaded when a DM conversation is opened (prunes to the last 200 messages per conversation).
     *   **Federated DMs:** DMs can be sent between users on different connected instances. The server handles relaying DM messages to the appropriate peer instance.
+    *   **Unread DM Indicators:** The client UI now visually indicates unread DMs, both on the "Direct Messages" tab and next to specific users in the user list.
 *   **User Management (Basic):**
     *   Users can set a username.
     *   Display of connected users (local and federated).
@@ -31,12 +32,15 @@ Freekaos aims to be a decentralized communication platform, similar in spirit to
     *   **Basic Message Federation:** Messages sent in guild channels are federated to directly connected peer instances.
     *   **Guild Invites (Intra-Instance):** Guild owners can generate single-use invite codes that other users on the same instance can use to join the guild.
 *   **Federation & P2P Communication:**
-    *   **Inter-Instance Connection:** Instances can connect to each other as peers based on a manual `peer_list.txt`.
+    *   **Dynamic Peer Discovery & Connection:**
+        *   Instances can bootstrap connections using an optional `config/bootstrap_nodes.txt` file.
+        *   Connected peers share lists of their active peer connections (instance IDs) with each other (gossip mechanism) to facilitate broader network discovery.
+        *   The server attempts to connect to discovered, non-blacklisted peers. Discovered peers are *not* automatically written to any local configuration file by the server.
     *   **Federated Global Chat:** Global chat messages from local clients are relayed to connected peer instances and displayed to their clients, indicating the origin instance.
     *   **Federated User List:** User lists are shared between connected instances.
 *   **Administrative Controls:**
     *   **Word Blacklist:** Instance administrators can define a list of words/phrases in `word_blacklist.txt` that will be censored in chat messages (applies to global chat, guild chat, and DMs).
-    *   **Instance Blacklist:** Instance administrators can define a list of peer instances in `instance_blacklist.txt` to block incoming/outgoing connections.
+    *   **Peer Blacklist (`peer_blacklist.txt`):** Instance administrators can define a list of peer instance addresses (e.g., `instance_at_3002`, `another.host.com:4000`) in `peer_blacklist.txt`. This file acts as a persistent blacklist to prevent connections *to or from* these specified peers, regardless of whether they are manually added for bootstrapping or discovered via gossip. It is *not* a list of peers to actively connect to.
 *   **Voice/Video Calls (WebRTC):**
     *   **Intra-Instance Calls:** Direct video/audio calls between users connected to the *same* server instance.
     *   **Federated Call Signaling:** Signaling messages for WebRTC (offers, answers, ICE candidates, rejections, hang-ups, busy status) are federated between instances, enabling calls between users on *different* connected instances.
@@ -58,9 +62,9 @@ freekaos/
 │   ├── direct_messages.json      # Stores direct message history
 │   ├── package.json              # Server-side dependencies (e.g., express, socket.io)
 │   └── config/                   # Server configuration files
-│       ├── instance_blacklist.txt  # List of banned instance hostnames/IPs
-│       ├── peer_list.txt           # List of peer instance addresses (e.g., localhost:3002)
-│       └── word_blacklist.txt      # List of words to censor
+│       ├── word_blacklist.txt      # List of words to censor
+│       ├── peer_blacklist.txt      # List of peer instance addresses to always block
+│       └── bootstrap_nodes.txt     # Optional list of initial peer addresses for discovery
 └── README.md                     # This file
 ```
 
@@ -81,9 +85,9 @@ freekaos/
     npm install
     ```
 3.  **Configure (Optional but Recommended for Federation):**
-    *   **Peer List:** Edit `server/config/peer_list.txt`. Add the addresses of other freekaos instances you want to connect to, one per line (e.g., `localhost:3002`).
+    *   **Bootstrap Nodes (`server/config/bootstrap_nodes.txt`):** Create this file and add the addresses of other freekaos instances you want to initially connect to for peer discovery, one per line (e.g., `localhost:3002`, `peer.example.com:3001`). If this file is empty or absent, the instance will start passively, relying on incoming connections or manual API calls (if developed) to join the network.
+    *   **Peer Blacklist (`server/config/peer_blacklist.txt`):** Create or edit this file to add peer instance addresses (e.g., `localhost:3003`, `spammer.instance.com:3001`) that your instance should *never* connect to, nor accept connections from. This list is checked against both bootstrap nodes and peers discovered through gossip.
     *   **Word Blacklist:** Edit `server/config/word_blacklist.txt` to add words/phrases to censor (one per line, lines starting with `#` are ignored).
-    *   **Instance Blacklist:** Edit `server/config/instance_blacklist.txt` to add instance addresses (hostnames or IPs) to block.
 4.  **Run the server:**
     ```bash
     node index.js
@@ -135,17 +139,16 @@ Once the server is running (e.g., on `http://localhost:3001`):
 
 ## Current Status & Next Steps
 
-Core functionality for global chat, user lists, administration, federated WebRTC calls, basic guild features (creation, channels, chat, intra-instance invites), and Direct Messages (DMs) with call integration is implemented. The UI has undergone an initial refresh for better consistency and appearance.
+Core functionality for global chat, user lists, administration, federated WebRTC calls, basic guild features (creation, channels, chat, intra-instance invites), Direct Messages (DMs) with call integration and unread indicators, and a dynamic peer discovery mechanism is implemented. The UI has undergone an initial refresh for better consistency and appearance.
 
 The immediate next steps involve:
-*   Thorough testing of all features, especially federated DMs, calls from DMs, and guild interactions across instances.
-*   Refining UI/UX elements, particularly for DM notifications (e.g., unread indicators) and guild owner controls.
+*   Thorough testing of all features, especially federated DMs, calls from DMs, guild interactions, and dynamic peer discovery across instances.
+*   Refining UI/UX elements, particularly for guild owner controls.
 
 Further development could include:
 *   User accounts with persistent identities (beyond session-based usernames).
 *   Full federation of guild structures (creation, deletion, channel changes) and memberships, including federated guild invites.
 *   More robust error handling and UI/UX improvements across all features.
 *   Encryption for messages and calls.
-*   A more dynamic peer discovery mechanism instead of a manual `peer_list.txt`.
 *   Support for file sharing in DMs and guild channels.
 *   Rich text formatting in messages. 
